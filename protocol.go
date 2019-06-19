@@ -167,11 +167,23 @@ type HeartbeatData struct {
 	consumerDataSet []ConsumerData
 }
 
-type PermName int
+type Permission int
 
 const (
-	PERM_PRIORITY PermName = 1 << 3
-	PERM_READ     PermName = 1 << 2
-	PERM_WRITE    PermName = 1 << 1
-	PERM_INHERIT  PermName = 1 << 0
+	PERM_PRIORITY Permission = 1 << 3
+	PERM_READ     Permission = 1 << 2
+	PERM_WRITE    Permission = 1 << 1
+	PERM_INHERIT  Permission = 1 << 0
 )
+
+func PermitRead(perm Permission) bool {
+	return (perm & PERM_READ) == PERM_READ
+}
+
+func PermitWrite(perm Permission) bool {
+	return (perm & PERM_WRITE) == PERM_WRITE
+}
+
+func PermitInherit(perm Permission) bool {
+	return (perm & PERM_INHERIT) == PERM_INHERIT
+}

@@ -1,6 +1,9 @@
 package mqclient
 
 import (
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -9,7 +12,7 @@ type QueueData struct {
 	BrokerName     string
 	ReadQueueNums  int
 	WriteQueueNums int
-	Perm           int
+	Perm           Permission
 	TopicSynFlag   int
 }
 
@@ -30,7 +33,7 @@ type TopicPublishInfo struct {
 	OrderTopic   bool
 	HasRouteInfo bool
 	MsgQueues    []MessageQueue
-	topicRoute   TopicRouteData
+	topicRoute   *TopicRouteData
 }
 
 var topicRouteTable sync.Map
@@ -48,64 +51,64 @@ func SetTopicRouteData(topic string, data *TopicRouteData) {
 	for _, brokerData := range data.brokerDatas {
 		brokerAddrTable.Store(brokerData.brokerName, brokerData.brokerAddrs)
 	}
-	publishInfoTable.Store(topic, toPublishInfo(data))
+	publishInfoTable.Store(topic, toPublishInfo(topic, data))
 	subscribeTable.Store(topic, toSubscribeInfo(topic, data))
 	topicRouteTable.Store(topic, cloneRouteData(data))
 }
 
-func toPublishInfo(route *TopicRouteData) *TopicPublishInfo {
+func toPublishInfo(topic string, route *TopicRouteData) *TopicPublishInfo {
 	info := new(TopicPublishInfo)
 	info.HasRouteInfo = true
-	info.setTopicRouteData(route);
-        if len(route.OrderTopicConf) > 0 {
-            brokers := strings.Split(route.OrderTopicConf, ";")
-            for _, broker := range brokers {
-                item := strings.Split(broker, ":")
-                nums := strconv.Atoi(item[1]);
-                for i := 0; i < nums; i++ {
-                    mq = MessageQueue{topic, item[0], i}
-                    info.MsgQueues = append(info.MsgQueues, mq)
-                }
-            }
-            info.setOrderTopic(true);
-        } else {
-            qds := route.queueDatas
-            sort.SliceStable(qds, func (i, j int) bool {
-				return qds[i].BrokerName < qds[j].BrokerName
-			})
-            for qd := range qds {
-                if (PermName.isWriteable(qd.getPerm())) {
-                    BrokerData brokerData = null;
-                    for (BrokerData bd : route.getBrokerDatas()) {
-                        if (bd.getBrokerName().equals(qd.getBrokerName())) {
-                            brokerData = bd;
-                            break;
-                        }
-                    }
+	info.topicRoute = route
+	if len(route.OrderTopicConf) > 0 {
+		brokers := strings.Split(route.OrderTopicConf, ";")
+		for _, broker := range brokers {
+			item := strings.Split(broker, ":")
+			nums, err := strconv.Atoi(item[1])
+			if err != nil {
+				for i := 0; i < nums; i++ {
+					mq := MessageQueue{topic, item[0], i}
+					info.MsgQueues = append(info.MsgQueues, mq)
+				}
+			}
+		}
+		info.OrderTopic = true
+	} else {
+		qds := route.queueDatas
+		sort.SliceStable(qds, func(i, j int) bool {
+			return qds[i].BrokerName < qds[j].BrokerName
+		})
+		for _, qd := range qds {
+			if PermitWrite(qd.Perm) {
+				for _, bd := range route.brokerDatas {
+					if bd.brokerName == qd.BrokerName {
+						if _, ok := bd.brokerAddrs[1]; ok {
+							for i := 0; i < qd.WriteQueueNums; i++ {
+								mq := MessageQueue{topic, qd.BrokerName, i}
+								info.MsgQueues = append(info.MsgQueues, mq)
+							}
+						}
+						break
+					}
+				}
+			}
+		}
+		info.OrderTopic = false
+	}
 
-                    if (null == brokerData) {
-                        continue;
-                    }
-
-                    if (!brokerData.getBrokerAddrs().containsKey(MixAll.MASTER_ID)) {
-                        continue;
-                    }
-
-                    for (int i = 0; i < qd.getWriteQueueNums(); i++) {
-                        MessageQueue mq = new MessageQueue(topic, qd.getBrokerName(), i);
-                        info.getMessageQueueList().add(mq);
-                    }
-                }
-            }
-
-            info.setOrderTopic(false);
-        }
-
-	return publishInfo
+	return info
 }
 
-func toSubscribeInfo(topic string, data *TopicRouteData) []MessageQueue {
+func toSubscribeInfo(topic string, route *TopicRouteData) []MessageQueue {
 	queues := make([]MessageQueue, 0)
+	for _, qd := range route.queueDatas {
+		if PermitRead(Permission(qd.Perm)) {
+			for i := 0; i < qd.ReadQueueNums; i++ {
+				mq := MessageQueue{topic, qd.BrokerName, i}
+				queues = append(queues, mq)
+			}
+		}
+	}
 	return queues
 }
 
