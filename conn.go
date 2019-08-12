@@ -12,12 +12,17 @@ import (
 	"time"
 )
 
+type ConnEventListener interface {
+	onMessage(*Command)
+	onError(opaque int, err error)
+}
+
 //Conn represent a conn to nameserv/broker
 type Conn struct {
 	config      *Config
 	conn        net.Conn
 	addr        string
-	respHandler func(*Command)
+	respHandler ConnEventListener
 	cmdChan     chan *Command
 	respChan    chan *Command
 	closeFlag   int32
@@ -28,7 +33,7 @@ type Conn struct {
 var connMap sync.Map
 var connMutex sync.Mutex
 
-func NewConn(addr string, config *Config, respHandler func(*Command)) *Conn {
+func NewConn(addr string, config *Config, respHandler ConnEventListener) *Conn {
 	return &Conn{
 		addr:        addr,
 		config:      config,
@@ -162,14 +167,14 @@ func (c *Conn) handlerLoop() {
 	for {
 		cmd = <-c.respChan
 		if cmd != nil {
-			c.respHandler(cmd)
+			c.respHandler.onMessage(cmd)
 		} else {
 			return
 		}
 	}
 }
 
-func GetOrCreateConn(addr string, config *Config, respHandler func(*Command)) (*Conn, error) {
+func GetOrCreateConn(addr string, config *Config, respHandler ConnEventListener) (*Conn, error) {
 	conn, ok := connMap.Load(addr)
 	if ok {
 		return conn.(*Conn), nil
@@ -190,5 +195,9 @@ func GetOrCreateConn(addr string, config *Config, respHandler func(*Command)) (*
 }
 
 func CloseAllConns() {
-
+	connMap.Range(func(k, v interface{}) bool {
+		conn := v.(*Conn)
+		conn.Close()
+		return true
+	})
 }

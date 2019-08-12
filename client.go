@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,6 +88,10 @@ func (this *MQClient) Shutdown() {
 	}
 }
 
+func (this *MQClient) SyncRequest(addr string, cmd *Command, t reflect.Type, timeout time.Duration) (*Command, error) {
+	return this.rpcClient.InvokeSync(addr, cmd, t, timeout)
+}
+
 func (this *MQClient) startScheduledTask() {
 	//fetch nameserv addrs if no nameserv supplied
 	this.executer.AddJob(10*time.Second, 2*time.Minute, this.fetchNameServAddr)
@@ -122,11 +127,13 @@ func (this *MQClient) sendHeartbeatToBroker(brokerAddr string) {
 		heartbeat.producerDataSet[i] = ProducerData{group}
 	}
 	cmd := HeartBeat(heartbeat)
-	resp, err := this.rpcClient.InvokeSync(brokerAddr, &cmd, 3*time.Second)
+	resp, err := this.rpcClient.InvokeSync(brokerAddr, &cmd, nil, 3*time.Second)
 	if err != nil {
 		//log error
+		return
 	} else if ResponseCode(resp.Code) != SUCCESS {
 		//log code and err msg
+		return
 	}
 	version := resp.Version
 	if verMap, ok := this.brokerVerMap.Load(brokerAddr); ok {
@@ -139,17 +146,22 @@ func (this *MQClient) sendHeartbeatToBroker(brokerAddr string) {
 }
 
 func (this *MQClient) fetchNameServAddr() {
+	if len(this.config.WsAddr) == 0 {
+		return
+	}
 	client := &http.Client{
 		Timeout: 3 * time.Second,
 	}
 	resp, err := client.Get(this.config.WsAddr)
 	if err != nil || resp.StatusCode != 200 {
 		//log err
+		return
 	}
 	body, rerr := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 	if rerr != nil {
 		//log err
+		return
 	}
 	//todo : check thread safe
 	respStr := strings.Trim(string(body), "\r\n ")
@@ -166,7 +178,7 @@ func (this *MQClient) SyncTopicFromNameserv() {
 		if len(addr) == 0 {
 			//log no nameserv error
 		}
-		resp, err := this.rpcClient.InvokeSync(addr, &req, 3*time.Second)
+		resp, err := this.rpcClient.InvokeSync(addr, &req, nil, 3*time.Second)
 		if err != nil {
 			//log error
 		}
@@ -178,7 +190,7 @@ func (this *MQClient) SyncTopicFromNameserv() {
 			err := json.Unmarshal(body, &routeData)
 			if err != nil {
 				//log error
-				return
+				continue
 			}
 			SetTopicRouteData(topic, routeData)
 		}
@@ -186,12 +198,12 @@ func (this *MQClient) SyncTopicFromNameserv() {
 }
 
 func (this *MQClient) selectActiveNameServ() string {
-	if this.rpcClient.GetOrCreateActiveConn(this.preNameservAddr) {
+	if _, err := this.rpcClient.GetActiveConn(this.preNameservAddr); err == nil {
 		return this.preNameservAddr
 	}
 	this.nameservLock.Lock()
 	defer this.nameservLock.Unlock()
-	if this.rpcClient.GetOrCreateActiveConn(this.preNameservAddr) {
+	if _, err := this.rpcClient.GetActiveConn(this.preNameservAddr); err == nil {
 		return this.preNameservAddr
 	}
 	addrList := this.nameServAddrs
@@ -199,7 +211,7 @@ func (this *MQClient) selectActiveNameServ() string {
 	for i := 0; i < len(addrList); i++ {
 		if this.preNameservAddr != addrList[index] {
 			this.preNameservAddr = addrList[index]
-			if this.rpcClient.GetOrCreateActiveConn(this.preNameservAddr) {
+			if _, err := this.rpcClient.GetActiveConn(this.preNameservAddr); err == nil {
 				return this.preNameservAddr
 			}
 		}

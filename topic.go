@@ -123,6 +123,9 @@ func cloneRouteData(data *TopicRouteData) *TopicRouteData {
 }
 
 func GetTopicPublishInfo(topic string) *TopicPublishInfo {
+	if v, ok := publishInfoTable.Load(topic); ok {
+		return v.(*TopicPublishInfo)
+	}
 	return nil
 }
 

@@ -18,6 +18,7 @@ const (
 )
 
 var producerTable sync.Map
+var publishTopics sync.Map
 
 type SendStatus int
 
@@ -204,7 +205,8 @@ func (p *DefaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 }
 
 func (p *DefaultProducer) sendRequest(brokerAddr string, msg *Message, mq *MessageQueue, cmd *Command, timeout time.Duration) (*SendResult, error) {
-	response, err := InvokeSync(brokerAddr, p.config, cmd, reflect.TypeOf(new(SendMessageResponseHeader)).Elem(), timeout)
+	publishTopics.Store(mq.Topic, true)
+	response, err := p.mqClient.SyncRequest(brokerAddr, cmd, reflect.TypeOf(new(SendMessageResponseHeader)).Elem(), timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +233,12 @@ func (p *DefaultProducer) sendRequest(brokerAddr string, msg *Message, mq *Messa
 }
 
 func GetAllPublishTopics() []string {
-	return []string{}
+	topicNames := make([]string, 0)
+	publishTopics.Range(func(k, value interface{}) bool {
+		topicNames = append(topicNames, k.(string))
+		return true
+	})
+	return topicNames
 }
 
 //register producer if not exist, one producer instance for each producerGroup
