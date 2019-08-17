@@ -40,6 +40,7 @@ type SendResult struct {
 	RegionId      string
 }
 
+//Producer is a rocketmq producer client interface
 type Producer interface {
 	Start() error
 	Shutdown()
@@ -48,33 +49,43 @@ type Producer interface {
 	SendAsync(msg Message, callback SendCallback, timeout time.Duration) error
 }
 
+//SendCallback is async request callback handler
 type SendCallback interface {
 	onSuccess(SendResult SendResult)
 	onError(err error)
 }
 
-type DefaultProducer struct {
+type defaultProducer struct {
 	producerGroup        string
-	config               *Config
+	config               Config
 	status               ServiceState
 	instanceName         string
 	mqClient             *MQClient
 	latencyFaultStrategy MQSelectStrategy
 }
 
-func NewProducer(config *Config) (Producer, error) {
+//NewProducer returns default rocketmq producer client
+func NewProducer(producerGroup string, config *Config) (Producer, error) {
+	if producerGroup == "" || config == nil {
+		return nil, errors.New("producerGroup and config must not be nil")
+	}
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	p := &DefaultProducer{
-		config:       config,
-		status:       CREATE_JUST,
-		instanceName: DEFAULT_INSTANCE_NAME,
+	instanceName := config.InstanceName
+	if instanceName == "" {
+		instanceName = DEFAULT_INSTANCE_NAME
+	}
+	p := &defaultProducer{
+		producerGroup: producerGroup,
+		config:        *config,
+		status:        CREATE_JUST,
+		instanceName:  instanceName,
 	}
 	return p, nil
 }
 
-func (p *DefaultProducer) Start() error {
+func (p *defaultProducer) Start() error {
 	if !atomic.CompareAndSwapInt32((*int32)(&p.status), int32(CREATE_JUST), int32(START_FAILED)) {
 		return errors.New("The producer service state not OK, maybe started once")
 	}
@@ -85,22 +96,30 @@ func (p *DefaultProducer) Start() error {
 		p.status = CREATE_JUST
 		return errors.New("The producer group has been created before")
 	}
-	p.mqClient = GetClientInstance(p.config, p.instanceName)
-	p.mqClient.Start()
+
+	p.mqClient = GetClientInstance(&p.config, p.instanceName)
+	err := p.mqClient.Start()
+	if err != nil {
+		unregisterProducer(p.producerGroup)
+		return err
+	}
+
 	p.status = RUNNING
+	p.mqClient.IncrReference()
 	p.mqClient.SendHeartbeatToBrokers()
 	return nil
 }
 
-func (p *DefaultProducer) Shutdown() {
+func (p *defaultProducer) Shutdown() {
 	if p.status == RUNNING {
 		unregisterProducer(p.producerGroup)
+		p.mqClient.DecrReference()
 		p.mqClient.Shutdown()
 		p.status = SHUTDOWN_ALREADY
 	}
 }
 
-func (p *DefaultProducer) Send(msg Message, timeout time.Duration) (SendResult, error) {
+func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, error) {
 	failResult := SendResult{SendStatus: SEND_FAIL}
 	if p.status != RUNNING {
 		return failResult, errors.New("The producer service state not OK")
@@ -109,16 +128,17 @@ func (p *DefaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 		return failResult, err
 	}
 	beginTime := time.Now()
-	topicPublishInfo := GetTopicPublishInfo(msg.Topic)
+	topicPublishInfo := p.mqClient.GetTopicPublishInfo(msg.Topic)
 	if topicPublishInfo == nil {
 		return failResult, errors.New("No route info of this topic:" + msg.Topic)
 	}
+
 	maxRetry := p.config.RetryTimesWhenSendFailed
 	var mq MessageQueue
 	var sendResult *SendResult
 	var err error
 	for times := 0; times < maxRetry; times++ {
-		var lastBrokerName string = mq.BrokerName
+		var lastBrokerName = mq.BrokerName
 		mq = p.latencyFaultStrategy.SelectOneMessageQueue(topicPublishInfo, lastBrokerName)
 		sendResult, err = p.sendKernelImpl(&msg, &mq, topicPublishInfo, timeout)
 		if err == nil {
@@ -156,15 +176,15 @@ func (p *DefaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 	return SendResult{SendStatus: SEND_FAIL}, err
 }
 
-func (p *DefaultProducer) SendOneway(msg Message, timeout time.Duration) (SendResult, error) {
+func (p *defaultProducer) SendOneway(msg Message, timeout time.Duration) (SendResult, error) {
 	return SendResult{}, nil
 }
 
-func (p *DefaultProducer) SendAsync(msg Message, callback SendCallback, timeout time.Duration) error {
+func (p *defaultProducer) SendAsync(msg Message, callback SendCallback, timeout time.Duration) error {
 	return nil
 }
 
-func (p *DefaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicInfo *TopicPublishInfo, timeout time.Duration) (*SendResult, error) {
+func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicInfo *TopicPublishInfo, timeout time.Duration) (*SendResult, error) {
 	brokerAddr := GetBrokerAddrByName(mq.BrokerName, p.config.SendMessageWithVIPChannel)
 	if brokerAddr == "" {
 		return nil, errors.New(fmt.Sprint("The broker [s%] not exist", mq.BrokerName))
@@ -204,7 +224,7 @@ func (p *DefaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 	return p.sendRequest(brokerAddr, msg, mq, &cmd, timeout)
 }
 
-func (p *DefaultProducer) sendRequest(brokerAddr string, msg *Message, mq *MessageQueue, cmd *Command, timeout time.Duration) (*SendResult, error) {
+func (p *defaultProducer) sendRequest(brokerAddr string, msg *Message, mq *MessageQueue, cmd *Command, timeout time.Duration) (*SendResult, error) {
 	publishTopics.Store(mq.Topic, true)
 	response, err := p.mqClient.SyncRequest(brokerAddr, cmd, reflect.TypeOf(new(SendMessageResponseHeader)).Elem(), timeout)
 	if err != nil {

@@ -23,14 +23,13 @@ const (
 	START_FAILED
 )
 
-var once sync.Once
-var instance *MQClient
+var clientMap sync.Map
 
 type MQClient struct {
-	clientId        string
+	clientID        string
 	config          *Config
-	rpcClient       RpcClient
-	fastClient      RpcClient
+	rpcClient       RPCClient
+	fastRPCClient   RPCClient
 	status          ServiceState
 	executer        *TimeWheel
 	hbState         int32
@@ -39,21 +38,32 @@ type MQClient struct {
 	nameServAddrs   []string
 	preNameservAddr string
 	nameservLock    sync.Mutex
+	refCount        int32
+	topicLock       sync.Mutex
+	topicManager    TopicRouteInfoManager
 }
 
+//GetClientInstance create a new client if instanceName had not been used
 func GetClientInstance(config *Config, instanceName string) *MQClient {
-	once.Do(func() {
-		clientId := GetIPAddr() + "@" + instanceName
-		instance = new(MQClient)
-		instance.clientId = clientId
-		instance.config = config
-		rpcClient := NewRpcClient(config)
-		instance.rpcClient = rpcClient
-		fastClient := NewRpcClient(config)
-		instance.fastClient = fastClient
-		instance.status = CREATE_JUST
-		instance.executer = NewTimeWheel(time.Second, 120)
-	})
+	clientID := GetIPAddr() + "@" + instanceName
+	value, ok := clientMap.Load(clientID)
+	if ok {
+		return value.(*MQClient)
+	}
+
+	instance := &MQClient{
+		clientID:      clientID,
+		config:        config,
+		rpcClient:     NewRPCClient(config),
+		fastRPCClient: NewRPCClient(config),
+		status:        CREATE_JUST,
+		executer:      NewTimeWheel(time.Second, 120),
+	}
+	value, ok = clientMap.LoadOrStore(clientID, instance)
+	if ok {
+		return value.(*MQClient)
+	}
+
 	return instance
 }
 
@@ -64,7 +74,7 @@ func (this *MQClient) GetAllUsingTopics() {
 func (this *MQClient) Start() (err error) {
 	if !atomic.CompareAndSwapInt32((*int32)(&this.status), int32(CREATE_JUST), int32(START_FAILED)) {
 		if this.status != RUNNING {
-			err = errors.New("MQClient " + this.clientId + " cannot be started, current status is " + strconv.Itoa(int(this.status)))
+			err = errors.New("MQClient " + this.clientID + " cannot be started, current status is " + strconv.Itoa(int(this.status)))
 		}
 		return
 	}
@@ -84,8 +94,17 @@ func (this *MQClient) Shutdown() {
 	}
 	if atomic.CompareAndSwapInt32((*int32)(&this.status), int32(RUNNING), int32(SHUTDOWN_ALREADY)) {
 		this.executer.Stop()
-		CloseAllConns()
+		this.rpcClient.CloseAllConns()
+		this.fastRPCClient.CloseAllConns()
 	}
+}
+
+func (client *MQClient) IncrReference() int32 {
+	return atomic.AddInt32(&client.refCount, 1)
+}
+
+func (client *MQClient) DecrReference() int32 {
+	return atomic.AddInt32(&client.refCount, -1)
 }
 
 func (this *MQClient) SyncRequest(addr string, cmd *Command, t reflect.Type, timeout time.Duration) (*Command, error) {
@@ -117,7 +136,7 @@ func (this *MQClient) SendHeartbeatToBrokers() {
 }
 
 func (this *MQClient) sendHeartbeatToBroker(brokerAddr string) {
-	heartbeat := HeartbeatData{clientID: this.clientId}
+	heartbeat := HeartbeatData{clientID: this.clientID}
 	groups := GetAllProducerGroups()
 	if len(groups) <= 0 {
 		return
@@ -170,30 +189,53 @@ func (this *MQClient) fetchNameServAddr() {
 	}
 }
 
-func (this *MQClient) SyncTopicFromNameserv() {
+func (client *MQClient) SyncTopicFromNameserv() {
+	client.topicLock.Lock()
+	defer client.topicLock.Unlock()
+
 	topics := GetAllPublishTopics()
 	for _, topic := range topics {
-		req := GetRouteInfo(topic)
-		addr := this.selectActiveNameServ()
-		if len(addr) == 0 {
-			//log no nameserv error
-		}
-		resp, err := this.rpcClient.InvokeSync(addr, &req, nil, 3*time.Second)
+		client.syncTopicFromNameserv(topic)
+	}
+}
+
+func (client *MQClient) GetTopicPublishInfo(topic string) *TopicPublishInfo {
+	publishInfo := client.topicManager.GetTopicPublishInfo(topic)
+	if publishInfo != nil {
+		return publishInfo
+	}
+
+	client.topicLock.Lock()
+	defer client.topicLock.Unlock()
+	publishInfo = client.topicManager.GetTopicPublishInfo(topic)
+	if publishInfo != nil {
+		return publishInfo
+	}
+	client.syncTopicFromNameserv(topic)
+	return client.topicManager.GetTopicPublishInfo(topic)
+}
+
+func (client *MQClient) syncTopicFromNameserv(topic string) {
+	req := GetRouteInfo(topic)
+	addr := client.selectActiveNameServ()
+	if len(addr) == 0 {
+		//log no nameserv error
+	}
+	resp, err := client.rpcClient.InvokeSync(addr, &req, nil, 3*time.Second)
+	if err != nil {
+		//log error
+	}
+	code, body := resp.Code, resp.Body
+	if ResponseCode(code) == TOPIC_NOT_EXIST {
+		//log error
+	} else if ResponseCode(code) == SUCCESS {
+		routeData := new(TopicRouteData)
+		err := json.Unmarshal(body, &routeData)
 		if err != nil {
 			//log error
+			return
 		}
-		code, body := resp.Code, resp.Body
-		if ResponseCode(code) == TOPIC_NOT_EXIST {
-			//log error
-		} else if ResponseCode(code) == SUCCESS {
-			routeData := new(TopicRouteData)
-			err := json.Unmarshal(body, &routeData)
-			if err != nil {
-				//log error
-				continue
-			}
-			SetTopicRouteData(topic, routeData)
-		}
+		client.topicManager.SetTopicRouteData(topic, routeData)
 	}
 }
 

@@ -8,14 +8,17 @@ import (
 	"time"
 )
 
-type RpcClient interface {
+type RPCClient interface {
 	InvokeSync(addr string, request *Command, responseType reflect.Type, timeout time.Duration) (*Command, error)
 	GetActiveConn(addr string) (*Conn, error)
+	CloseAllConns()
 }
 
-type defaultRpcClient struct {
+type defaultRPCClient struct {
 	config   *Config
 	reqCache sync.Map
+	connMap  sync.Map
+	lock     sync.Mutex
 }
 
 type pendingResponse struct {
@@ -23,11 +26,11 @@ type pendingResponse struct {
 	err error
 }
 
-func NewRpcClient(config *Config) RpcClient {
-	return &defaultRpcClient{config: config}
+func NewRPCClient(config *Config) RPCClient {
+	return &defaultRPCClient{config: config}
 }
 
-func (c *defaultRpcClient) InvokeSync(addr string, request *Command, responseType reflect.Type, timeout time.Duration) (*Command, error) {
+func (c *defaultRPCClient) InvokeSync(addr string, request *Command, responseType reflect.Type, timeout time.Duration) (*Command, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer func() {
 		cancel()
@@ -62,11 +65,40 @@ func (c *defaultRpcClient) InvokeSync(addr string, request *Command, responseTyp
 	}
 }
 
-func (c *defaultRpcClient) GetActiveConn(addr string) (*Conn, error) {
-	return GetOrCreateConn(addr, c.config, c)
+func (c *defaultRPCClient) GetActiveConn(addr string) (*Conn, error) {
+	return c.getOrCreateConn(addr, c.config, c)
 }
 
-func (c *defaultRpcClient) onMessage(cmd *Command) {
+func (c *defaultRPCClient) getOrCreateConn(addr string, config *Config, respHandler ConnEventListener) (*Conn, error) {
+	conn, ok := c.connMap.Load(addr)
+	if ok {
+		return conn.(*Conn), nil
+	}
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	conn, ok = c.connMap.Load(addr)
+	if ok {
+		return conn.(*Conn), nil
+	}
+	newConn := NewConn(addr, config, respHandler)
+	err := newConn.Connect()
+	if err != nil {
+		return nil, err
+	}
+	c.connMap.Store(addr, newConn)
+	return newConn, nil
+}
+
+func (c *defaultRPCClient) CloseAllConns() {
+	c.connMap.Range(func(k, v interface{}) bool {
+		conn := v.(*Conn)
+		c.connMap.Delete(conn.addr)
+		conn.Close()
+		return true
+	})
+}
+
+func (c *defaultRPCClient) OnMessage(cmd *Command) {
 	ch, ok := c.reqCache.Load(cmd.Opaque)
 	if ok {
 		defer recover()
@@ -74,7 +106,7 @@ func (c *defaultRpcClient) onMessage(cmd *Command) {
 	}
 }
 
-func (c *defaultRpcClient) onError(opaque int, err error) {
+func (c *defaultRPCClient) OnError(opaque int, err error) {
 	ch, ok := c.reqCache.Load(opaque)
 	if ok {
 		defer recover()
@@ -82,10 +114,14 @@ func (c *defaultRpcClient) onError(opaque int, err error) {
 	}
 }
 
-func (c *defaultRpcClient) closeChan(requestId int32) {
-	v, ok := c.reqCache.Load(requestId)
+func (c *defaultRPCClient) OnIOError(conn *Conn, err error) {
+
+}
+
+func (c *defaultRPCClient) closeChan(requestID int32) {
+	v, ok := c.reqCache.Load(requestID)
 	if ok {
-		c.reqCache.Delete(requestId)
+		c.reqCache.Delete(requestID)
 		close(v.(chan *Command))
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
 type QueueData struct {
@@ -36,24 +35,20 @@ type TopicPublishInfo struct {
 	topicRoute   *TopicRouteData
 }
 
-var topicRouteTable sync.Map
-var brokerAddrTable sync.Map
-var publishInfoTable sync.Map
-var subscribeTable sync.Map
-var topicRouteLock uint32
+type TopicRouteInfoManager struct {
+	topicRouteTable  sync.Map
+	brokerAddrTable  sync.Map
+	publishInfoTable sync.Map
+	subscribeTable   sync.Map
+}
 
-func SetTopicRouteData(topic string, data *TopicRouteData) {
-	if !atomic.CompareAndSwapUint32(&topicRouteLock, 0, 1) {
-		//log SetTopicRouteData tryLock timeout
-	}
-	defer atomic.StoreUint32(&topicRouteLock, 0)
-
+func (m *TopicRouteInfoManager) SetTopicRouteData(topic string, data *TopicRouteData) {
 	for _, brokerData := range data.brokerDatas {
-		brokerAddrTable.Store(brokerData.brokerName, brokerData.brokerAddrs)
+		m.brokerAddrTable.Store(brokerData.brokerName, brokerData.brokerAddrs)
 	}
-	publishInfoTable.Store(topic, toPublishInfo(topic, data))
-	subscribeTable.Store(topic, toSubscribeInfo(topic, data))
-	topicRouteTable.Store(topic, cloneRouteData(data))
+	m.publishInfoTable.Store(topic, toPublishInfo(topic, data))
+	m.subscribeTable.Store(topic, toSubscribeInfo(topic, data))
+	m.topicRouteTable.Store(topic, cloneRouteData(data))
 }
 
 func toPublishInfo(topic string, route *TopicRouteData) *TopicPublishInfo {
@@ -122,8 +117,8 @@ func cloneRouteData(data *TopicRouteData) *TopicRouteData {
 	return cloneRouteData
 }
 
-func GetTopicPublishInfo(topic string) *TopicPublishInfo {
-	if v, ok := publishInfoTable.Load(topic); ok {
+func (m *TopicRouteInfoManager) GetTopicPublishInfo(topic string) *TopicPublishInfo {
+	if v, ok := m.publishInfoTable.Load(topic); ok {
 		return v.(*TopicPublishInfo)
 	}
 	return nil

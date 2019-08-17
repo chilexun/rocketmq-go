@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -148,24 +147,10 @@ func (c *Command) encodeHeader() ([]byte, error) {
 		elemV := reflect.ValueOf(c.CustomHeader).Elem()
 		for i := 0; i < elemT.NumField(); i++ {
 			f := elemT.Field(i)
-			c.ExtFields[lowerFirstCh(f.Name)] = coerceString(elemV.FieldByName(f.Name).InterfaceData())
+			c.ExtFields[lowerFirstCh(f.Name)] = CoerceString(elemV.FieldByName(f.Name).InterfaceData())
 		}
 	}
 	return json.Marshal(c)
-}
-
-func coerceString(v interface{}) string {
-	switch v := v.(type) {
-	case string:
-		return v
-	case int, int16, int32, int64, uint, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%f", v)
-	case bool:
-		return fmt.Sprintf("%v", v)
-	}
-	return fmt.Sprintf("%s", v)
 }
 
 func lowerFirstCh(str string) string {

@@ -13,8 +13,12 @@ import (
 )
 
 type ConnEventListener interface {
-	onMessage(*Command)
-	onError(opaque int, err error)
+	//OnMessage is invoked when received a response
+	OnMessage(*Command)
+	//OnError is invoked when send req error
+	OnError(opaque int, err error)
+	//OnIOError is invoked when tcp conn error
+	OnIOError(*Conn, error)
 }
 
 //Conn represent a conn to nameserv/broker
@@ -29,9 +33,6 @@ type Conn struct {
 	stopper     sync.Once
 	wg          sync.WaitGroup
 }
-
-var connMap sync.Map
-var connMutex sync.Mutex
 
 func NewConn(addr string, config *Config, respHandler ConnEventListener) *Conn {
 	return &Conn{
@@ -50,8 +51,8 @@ func (c *Conn) Connect() error {
 	}
 
 	var err error
-	if c.config.TlsConfig != nil {
-		c.conn, err = tls.DialWithDialer(dialer, "tcp", c.addr, c.config.TlsConfig)
+	if c.config.TLSConfig != nil {
+		c.conn, err = tls.DialWithDialer(dialer, "tcp", c.addr, c.config.TLSConfig)
 	} else {
 		c.conn, err = dialer.Dial("tcp", c.addr)
 	}
@@ -68,7 +69,6 @@ func (c *Conn) Connect() error {
 
 func (c *Conn) Close() error {
 	c.stopper.Do(func() {
-		connMap.Delete(c.addr)
 		atomic.StoreInt32(&c.closeFlag, 1)
 		c.conn.Close()
 		c.wg.Wait()
@@ -167,37 +167,9 @@ func (c *Conn) handlerLoop() {
 	for {
 		cmd = <-c.respChan
 		if cmd != nil {
-			c.respHandler.onMessage(cmd)
+			c.respHandler.OnMessage(cmd)
 		} else {
 			return
 		}
 	}
-}
-
-func GetOrCreateConn(addr string, config *Config, respHandler ConnEventListener) (*Conn, error) {
-	conn, ok := connMap.Load(addr)
-	if ok {
-		return conn.(*Conn), nil
-	}
-	connMutex.Lock()
-	defer connMutex.Unlock()
-	conn, ok = connMap.Load(addr)
-	if ok {
-		return conn.(*Conn), nil
-	}
-	newConn := NewConn(addr, config, respHandler)
-	err := newConn.Connect()
-	if err != nil {
-		return nil, err
-	}
-	connMap.Store(addr, newConn)
-	return newConn, nil
-}
-
-func CloseAllConns() {
-	connMap.Range(func(k, v interface{}) bool {
-		conn := v.(*Conn)
-		conn.Close()
-		return true
-	})
 }
