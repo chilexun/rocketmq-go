@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ const (
 )
 
 var producerTable sync.Map
-var publishTopics sync.Map
 
 type SendStatus int
 
@@ -56,12 +54,12 @@ type SendCallback interface {
 }
 
 type defaultProducer struct {
-	producerGroup        string
-	config               Config
-	status               ServiceState
-	instanceName         string
-	mqClient             *MQClient
-	latencyFaultStrategy MQSelectStrategy
+	producerGroup    string
+	config           Config
+	status           ServiceState
+	instanceName     string
+	mqClient         *MQClient
+	mqSelectStrategy MQSelectStrategy
 }
 
 //NewProducer returns default rocketmq producer client
@@ -77,10 +75,11 @@ func NewProducer(producerGroup string, config *Config) (Producer, error) {
 		instanceName = DEFAULT_INSTANCE_NAME
 	}
 	p := &defaultProducer{
-		producerGroup: producerGroup,
-		config:        *config,
-		status:        CREATE_JUST,
-		instanceName:  instanceName,
+		producerGroup:    producerGroup,
+		config:           *config,
+		status:           CREATE_JUST,
+		instanceName:     instanceName,
+		mqSelectStrategy: NewStrategy(),
 	}
 	return p, nil
 }
@@ -137,12 +136,12 @@ func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 	var mq MessageQueue
 	var sendResult *SendResult
 	var err error
-	for times := 0; times < maxRetry; times++ {
+	for times := 0; times <= maxRetry; times++ {
 		var lastBrokerName = mq.BrokerName
-		mq = p.latencyFaultStrategy.SelectOneMessageQueue(topicPublishInfo, lastBrokerName)
+		mq = p.mqSelectStrategy.SelectOneMessageQueue(topicPublishInfo, lastBrokerName)
 		sendResult, err = p.sendKernelImpl(&msg, &mq, topicPublishInfo, timeout)
 		if err == nil {
-			p.latencyFaultStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), false})
+			p.mqSelectStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), false})
 			if sendResult.SendStatus != SEND_OK {
 				if p.config.RetryAnotherBrokerWhenNotStoreOK {
 					continue
@@ -150,7 +149,7 @@ func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 			}
 			return *sendResult, nil
 		} else {
-			p.latencyFaultStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), true})
+			p.mqSelectStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), true})
 			switch err.(type) {
 			case MQBrokerError:
 				brokerErr := err.(MQBrokerError)
@@ -173,7 +172,7 @@ func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 			}
 		}
 	}
-	return SendResult{SendStatus: SEND_FAIL}, err
+	return failResult, err
 }
 
 func (p *defaultProducer) SendOneway(msg Message, timeout time.Duration) (SendResult, error) {
@@ -211,25 +210,15 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 		ReconsumeTimes: 0,
 	}
 	if strings.HasPrefix(requestHeader.Topic, "%RETRY%") {
-		if reconsumeTimes := msg.Properties[PROPERTY_RECONSUME_TIME]; reconsumeTimes != "" {
-			requestHeader.ReconsumeTimes, _ = strconv.Atoi(reconsumeTimes)
-			delete(msg.Properties, PROPERTY_RECONSUME_TIME)
-		}
-		if maxReTimes := msg.Properties[PROPERTY_MAX_RECONSUME_TIMES]; maxReTimes != "" {
-			requestHeader.MaxReconsumeTimes, _ = strconv.Atoi(maxReTimes)
-			delete(msg.Properties, PROPERTY_MAX_RECONSUME_TIMES)
-		}
+		setRetryHeader(requestHeader, msg.Properties)
 	}
-	cmd := SendMessage(requestHeader, msg.Body)
-	return p.sendRequest(brokerAddr, msg, mq, &cmd, timeout)
-}
 
-func (p *defaultProducer) sendRequest(brokerAddr string, msg *Message, mq *MessageQueue, cmd *Command, timeout time.Duration) (*SendResult, error) {
-	publishTopics.Store(mq.Topic, true)
-	response, err := p.mqClient.SyncRequest(brokerAddr, cmd, reflect.TypeOf(new(SendMessageResponseHeader)).Elem(), timeout)
+	cmd := SendMessage(requestHeader, msg.Body)
+	response, err := p.mqClient.SendMessageRequest(brokerAddr, msg, mq, &cmd, timeout)
 	if err != nil {
 		return nil, err
 	}
+
 	sendResult := &SendResult{}
 	switch code := ResponseCode(response.Code); code {
 	case SUCCESS:
@@ -252,13 +241,15 @@ func (p *defaultProducer) sendRequest(brokerAddr string, msg *Message, mq *Messa
 	return sendResult, nil
 }
 
-func GetAllPublishTopics() []string {
-	topicNames := make([]string, 0)
-	publishTopics.Range(func(k, value interface{}) bool {
-		topicNames = append(topicNames, k.(string))
-		return true
-	})
-	return topicNames
+func setRetryHeader(header *SendMessageRequestHeader, msgProps map[string]string) {
+	if reconsumeTimes := msgProps[PROPERTY_RECONSUME_TIME]; reconsumeTimes != "" {
+		header.ReconsumeTimes, _ = strconv.Atoi(reconsumeTimes)
+		delete(msgProps, PROPERTY_RECONSUME_TIME)
+	}
+	if maxReTimes := msgProps[PROPERTY_MAX_RECONSUME_TIMES]; maxReTimes != "" {
+		header.MaxReconsumeTimes, _ = strconv.Atoi(maxReTimes)
+		delete(msgProps, PROPERTY_MAX_RECONSUME_TIMES)
+	}
 }
 
 //register producer if not exist, one producer instance for each producerGroup
@@ -270,7 +261,6 @@ func registerProducer(producerGroup string, producer Producer) bool {
 
 func unregisterProducer(producerGroup string) {
 	producerTable.Delete(producerGroup)
-	//todo unregister client
 }
 
 func GetAllProducerGroups() []string {

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type QueueData struct {
@@ -29,10 +30,11 @@ type TopicRouteData struct {
 }
 
 type TopicPublishInfo struct {
-	OrderTopic   bool
-	HasRouteInfo bool
-	MsgQueues    []MessageQueue
-	topicRoute   *TopicRouteData
+	OrderTopic     bool
+	HasRouteInfo   bool
+	MsgQueues      []MessageQueue
+	topicRoute     *TopicRouteData
+	nextQueueIndex int32
 }
 
 type TopicRouteInfoManager struct {
@@ -122,6 +124,28 @@ func (m *TopicRouteInfoManager) GetTopicPublishInfo(topic string) *TopicPublishI
 		return v.(*TopicPublishInfo)
 	}
 	return nil
+}
+
+func (t *TopicPublishInfo) GetQueueNumber() int {
+	return len(t.MsgQueues)
+}
+
+func (t *TopicPublishInfo) GetWriteQueueNumber(brokerName string) int {
+	for _, queueData := range t.topicRoute.queueDatas {
+		if queueData.BrokerName == brokerName {
+			return queueData.WriteQueueNums
+		}
+	}
+	return -1
+}
+
+func (t *TopicPublishInfo) GetNextQueue() MessageQueue {
+	nextIndex := atomic.AddInt32(&t.nextQueueIndex, 1)
+	pos := int(nextIndex) % len(t.MsgQueues)
+	if pos < 0 {
+		pos = 0
+	}
+	return t.MsgQueues[pos]
 }
 
 func GetTopicSubscribeInfo() {

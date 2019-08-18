@@ -16,18 +16,18 @@ type Config struct {
 	PollNameServerInterval           time.Duration `min:"100ms" default:"60s"`
 	HeartbeatBrokerInterval          time.Duration `min:"100ms" default:"60s"`
 	InstanceName                     string        `default:"DEFAULT"`
-	RetryTimesWhenSendFailed         int           `min:"0" default:"3"`
-	RetryAnotherBrokerWhenNotStoreOK bool          `default:"true"`
-	SendMessageWithVIPChannel        bool
-	CompressMsgBodyOverHowmuch       int
-	ZipCompressLevel                 int
+	RetryTimesWhenSendFailed         int           `min:"0" default:"2"`
+	RetryAnotherBrokerWhenNotStoreOK bool
+	SendMessageWithVIPChannel        bool          `default:"true"`
+	CompressMsgBodyOverHowmuch       int           `min:"512" default:"4094"`
+	ZipCompressLevel                 int           `min:"0" default:"1"`
 	ConnectTimeout                   time.Duration `min:"100ms" max:"5m" default:"2m"`
 	ReadTimeout                      time.Duration `min:"100ms" max:"5m" default:"60s"`
 	WriteTimeout                     time.Duration `min:"100ms" max:"5m" default:"1s"`
 	LocalAddr                        net.Addr
 	TLSConfig                        *tls.Config
-	SendChanSize                     uint `default:"100"`
-	RcvChanSize                      uint `default:"100"`
+	SendChanSize                     int `default:"100"`
+	RcvChanSize                      int `default:"100"`
 	initialized                      bool
 }
 

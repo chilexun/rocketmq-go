@@ -41,6 +41,7 @@ type MQClient struct {
 	refCount        int32
 	topicLock       sync.Mutex
 	topicManager    TopicRouteInfoManager
+	usedTopics      sync.Map
 }
 
 //GetClientInstance create a new client if instanceName had not been used
@@ -107,8 +108,9 @@ func (client *MQClient) DecrReference() int32 {
 	return atomic.AddInt32(&client.refCount, -1)
 }
 
-func (this *MQClient) SyncRequest(addr string, cmd *Command, t reflect.Type, timeout time.Duration) (*Command, error) {
-	return this.rpcClient.InvokeSync(addr, cmd, t, timeout)
+func (client *MQClient) SendMessageRequest(brokerAddr string, msg *Message, mq *MessageQueue, cmd *Command, timeout time.Duration) (*Command, error) {
+	client.usedTopics.Store(mq.Topic, true)
+	return client.rpcClient.InvokeSync(brokerAddr, cmd, reflect.TypeOf(new(SendMessageResponseHeader)).Elem(), timeout)
 }
 
 func (this *MQClient) startScheduledTask() {
@@ -182,7 +184,9 @@ func (this *MQClient) fetchNameServAddr() {
 		//log err
 		return
 	}
-	//todo : check thread safe
+
+	this.nameservLock.Lock()
+	defer this.nameservLock.Unlock()
 	respStr := strings.Trim(string(body), "\r\n ")
 	if len(body) > 0 {
 		this.nameServAddrs = strings.Split(respStr, ";")
@@ -193,10 +197,10 @@ func (client *MQClient) SyncTopicFromNameserv() {
 	client.topicLock.Lock()
 	defer client.topicLock.Unlock()
 
-	topics := GetAllPublishTopics()
-	for _, topic := range topics {
-		client.syncTopicFromNameserv(topic)
-	}
+	client.usedTopics.Range(func(k, value interface{}) bool {
+		client.syncTopicFromNameserv(k.(string))
+		return true
+	})
 }
 
 func (client *MQClient) GetTopicPublishInfo(topic string) *TopicPublishInfo {
@@ -258,7 +262,7 @@ func (this *MQClient) selectActiveNameServ() string {
 			}
 		}
 		index++
-		index /= len(addrList)
+		index %= len(addrList)
 	}
 	return ""
 }
