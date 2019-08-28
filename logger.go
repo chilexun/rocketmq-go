@@ -5,27 +5,27 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-type LoggerLevel int8
+type LogLevel int8
 
 const (
-	// DebugLevel logs are typically voluminous, and are usually disabled in
+	// Debug Level logs are typically voluminous, and are usually disabled in
 	// production.
-	Debug = LoggerLevel(zapcore.DebugLevel)
-	// InfoLevel is the default logging priority.
-	Info = LoggerLevel(zapcore.InfoLevel)
-	// WarnLevel logs are more important than Infof, but don't need individual
+	Debug = LogLevel(zapcore.DebugLevel)
+	// Info Level is the default logging priority.
+	Info = LogLevel(zapcore.InfoLevel)
+	// Warn Level logs are more important than Infof, but don't need individual
 	// human review.
-	Warn = LoggerLevel(zapcore.WarnLevel)
-	// ErrorLevel logs are high-priority. If an application is running smoothly,
+	Warn = LogLevel(zapcore.WarnLevel)
+	// Error Level logs are high-priority. If an application is running smoothly,
 	// it shouldn't generate any error-level logs.
-	Error = LoggerLevel(zapcore.ErrorLevel)
-	// DPanicLevel logs are particularly important errors. In development the
+	Error = LogLevel(zapcore.ErrorLevel)
+	// DPanic Level logs are particularly important errors. In development the
 	// logger panics after writing the message.
-	DPanic = LoggerLevel(zapcore.DPanicLevel)
-	// PanicLevel logs a message, then panics.
-	Panic = LoggerLevel(zapcore.PanicLevel)
-	// FatalLevel logs a message, then calls os.Exit(1).
-	Fatal = LoggerLevel(zapcore.FatalLevel)
+	DPanic = LogLevel(zapcore.DPanicLevel)
+	// Panic Level logs a message, then panics.
+	Panic = LogLevel(zapcore.PanicLevel)
+	// Fatal Level logs a message, then calls os.Exit(1).
+	Fatal = LogLevel(zapcore.FatalLevel)
 )
 
 type Logger interface {
@@ -43,7 +43,7 @@ type Logger interface {
 var (
 	logger Logger
 
-	zapLoggerConfig        = zap.NewDevelopmentConfig()
+	zapLoggerConfig        = zap.NewProductionConfig()
 	zapLoggerEncoderConfig = zapcore.EncoderConfig{
 		TimeKey:        "time",
 		LevelKey:       "level",
@@ -73,8 +73,8 @@ func GetLogger() Logger {
 	return logger
 }
 
-// SetLoggerLevel
-func SetLoggerLevel(level LoggerLevel) error {
+// SetLogLevel
+func SetLogLevel(level LogLevel) error {
 	zapLoggerConfig.Level = zap.NewAtomicLevelAt(zapcore.Level(level))
 	zapLogger, err := zapLoggerConfig.Build()
 	if err != nil {

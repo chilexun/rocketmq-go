@@ -1,6 +1,7 @@
 package mqclient
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
@@ -16,30 +17,35 @@ type ConnEventListener interface {
 	//OnMessage is invoked when received a response
 	OnMessage(*Command)
 	//OnError is invoked when send req error
-	OnError(opaque int, err error)
+	OnError(opaque int32, err error)
 	//OnIOError is invoked when tcp conn error
 	OnIOError(*Conn, error)
 }
 
+type commandHolder struct {
+	cmd *Command
+	ctx context.Context
+}
+
 //Conn represent a conn to nameserv/broker
 type Conn struct {
-	config      *Config
+	config      *ClientConfig
 	conn        net.Conn
 	addr        string
 	respHandler ConnEventListener
-	cmdChan     chan *Command
+	cmdChan     chan commandHolder
 	respChan    chan *Command
 	closeFlag   int32
 	stopper     sync.Once
 	wg          sync.WaitGroup
 }
 
-func NewConn(addr string, config *Config, respHandler ConnEventListener) *Conn {
+func NewConn(addr string, config *ClientConfig, respHandler ConnEventListener) *Conn {
 	return &Conn{
 		addr:        addr,
 		config:      config,
 		respHandler: respHandler,
-		cmdChan:     make(chan *Command, config.SendChanSize),
+		cmdChan:     make(chan commandHolder, config.SendChanSize),
 		respChan:    make(chan *Command, config.RcvChanSize),
 	}
 }
@@ -67,28 +73,32 @@ func (c *Conn) Connect() error {
 	return nil
 }
 
-func (c *Conn) Close() error {
+func (c *Conn) Close() (err error) {
 	c.stopper.Do(func() {
 		atomic.StoreInt32(&c.closeFlag, 1)
-		c.conn.Close()
+		err = c.conn.Close()
 		c.wg.Wait()
 		close(c.cmdChan)
 		close(c.respChan)
 	})
-	return nil
+	return
 }
 
 func (c *Conn) Read(p []byte) (int, error) {
-	c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
-	return c.Read(p)
+	if c.config.ReadTimeout > 0 {
+		c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout))
+	}
+	return c.conn.Read(p)
 }
 
 func (c *Conn) Write(bytes []byte) (int, error) {
-	c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
-	return c.Write(bytes)
+	if c.config.WriteTimeout > 0 {
+		c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
+	}
+	return c.conn.Write(bytes)
 }
 
-func (c *Conn) WriteCommand(cmd *Command) (err error) {
+func (c *Conn) WriteCommand(ctx context.Context, cmd *Command) (err error) {
 	if atomic.LoadInt32(&c.closeFlag) == 1 {
 		return errors.New("Connect had been closed")
 	}
@@ -97,8 +107,12 @@ func (c *Conn) WriteCommand(cmd *Command) (err error) {
 			err = errors.New("Connect had been closed")
 		}
 	}()
-	c.cmdChan <- cmd
-	return err
+	select {
+	case c.cmdChan <- commandHolder{cmd, ctx}:
+		return nil
+	case <-ctx.Done():
+		return errors.New("Request send buffer's full")
+	}
 }
 
 //    According RocketMQ protocol
@@ -124,10 +138,11 @@ func (c *Conn) readLoop() {
 		}
 		if err != nil {
 			if err == io.EOF && atomic.LoadInt32(&c.closeFlag) == 1 {
-				return
+				//manual closed
 			}
 			if !strings.Contains(err.Error(), "use of closed network connection") {
-				//write err log
+				c.respHandler.OnIOError(c, err)
+				return
 			}
 			return
 		}
@@ -143,22 +158,27 @@ func (c *Conn) writeLoop() {
 		c.wg.Done()
 		c.Close()
 	}()
-	var cmd *Command
+	var cmdHolder commandHolder
 	for atomic.LoadInt32(&c.closeFlag) == 0 {
-		cmd = <-c.cmdChan
-		data, err := cmd.Encode()
+		cmdHolder = <-c.cmdChan
+		err := cmdHolder.ctx.Err()
+		if err != nil {
+			logger.Warnf("Command discard since timeout, %d", cmdHolder.cmd.Opaque)
+			continue
+		}
+		data, err := cmdHolder.cmd.Encode()
 		if err == nil {
+			//todo: use bufio
 			err = binary.Write(c, binary.BigEndian, int32(len(data)))
 			if err == nil {
 				_, err = c.Write(data)
 			}
 			if err != nil && atomic.LoadInt32(&c.closeFlag) != 1 {
-				//write io err log
+				logger.Warnf("Command discard since conn closed, %d", cmdHolder.cmd.Opaque)
 				return
 			}
-		} else {
-			//write encode err log
 		}
+		c.respHandler.OnError(cmdHolder.cmd.Opaque, err)
 	}
 }
 

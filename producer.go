@@ -55,7 +55,7 @@ type SendCallback interface {
 
 type defaultProducer struct {
 	producerGroup    string
-	config           Config
+	config           ProducerConfig
 	status           ServiceState
 	instanceName     string
 	mqClient         *MQClient
@@ -63,7 +63,7 @@ type defaultProducer struct {
 }
 
 //NewProducer returns default rocketmq producer client
-func NewProducer(producerGroup string, config *Config) (Producer, error) {
+func NewProducer(producerGroup string, config *ProducerConfig) (Producer, error) {
 	if producerGroup == "" || config == nil {
 		return nil, errors.New("producerGroup and config must not be nil")
 	}
@@ -85,36 +85,36 @@ func NewProducer(producerGroup string, config *Config) (Producer, error) {
 }
 
 func (p *defaultProducer) Start() error {
-	if !atomic.CompareAndSwapInt32((*int32)(&p.status), int32(CREATE_JUST), int32(START_FAILED)) {
+	if !atomic.CompareAndSwapInt32(&p.status, CREATE_JUST, START_FAILED) {
 		return errors.New("The producer service state not OK, maybe started once")
 	}
 	if p.producerGroup != CLIENT_INNER_PRODUCER_GROUP && p.instanceName == DEFAULT_INSTANCE_NAME {
 		p.instanceName = strconv.Itoa(os.Getpid())
 	}
 	if !registerProducer(p.producerGroup, p) {
-		p.status = CREATE_JUST
+		atomic.StoreInt32(&p.status, CREATE_JUST)
 		return errors.New("The producer group has been created before")
 	}
 
-	p.mqClient = GetClientInstance(&p.config, p.instanceName)
+	p.mqClient = GetClientInstance(&p.config.ClientConfig, p.instanceName)
 	err := p.mqClient.Start()
 	if err != nil {
 		unregisterProducer(p.producerGroup)
 		return err
 	}
 
-	p.status = RUNNING
+	atomic.StoreInt32(&p.status, RUNNING)
 	p.mqClient.IncrReference()
 	p.mqClient.SendHeartbeatToBrokers()
 	return nil
 }
 
 func (p *defaultProducer) Shutdown() {
-	if p.status == RUNNING {
+	if atomic.LoadInt32(&p.status) == RUNNING {
 		unregisterProducer(p.producerGroup)
 		p.mqClient.DecrReference()
 		p.mqClient.Shutdown()
-		p.status = SHUTDOWN_ALREADY
+		atomic.StoreInt32(&p.status, SHUTDOWN_ALREADY)
 	}
 }
 
@@ -148,28 +148,22 @@ func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 				}
 			}
 			return *sendResult, nil
-		} else {
-			p.mqSelectStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), true})
-			switch err.(type) {
-			case MQBrokerError:
-				brokerErr := err.(MQBrokerError)
-				switch brokerErr.Code {
-				case TOPIC_NOT_EXIST,
-					SERVICE_NOT_AVAILABLE,
-					SYSTEM_ERROR,
-					NO_PERMISSION,
-					NO_BUYER_ID,
-					NOT_IN_CURRENT_UNIT:
-					continue
-				default:
-					if sendResult != nil {
-						return *sendResult, nil
-					}
-					break
-				}
-			default:
+		}
+
+		p.mqSelectStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), true})
+		switch err.(type) {
+		case *MQBrokerError:
+			brokerErr := err.(MQBrokerError)
+			switch brokerErr.Code {
+			case TOPIC_NOT_EXIST, SERVICE_NOT_AVAILABLE, SYSTEM_ERROR, NO_PERMISSION, NO_BUYER_ID, NOT_IN_CURRENT_UNIT:
 				continue
+			default:
+				if sendResult != nil {
+					return *sendResult, nil
+				}
 			}
+		default:
+			continue
 		}
 	}
 	return failResult, err

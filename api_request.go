@@ -15,7 +15,7 @@ type RPCClient interface {
 }
 
 type defaultRPCClient struct {
-	config   *Config
+	config   *ClientConfig
 	reqCache sync.Map
 	connMap  sync.Map
 	lock     sync.Mutex
@@ -26,7 +26,7 @@ type pendingResponse struct {
 	err error
 }
 
-func NewRPCClient(config *Config) RPCClient {
+func NewRPCClient(config *ClientConfig) RPCClient {
 	return &defaultRPCClient{config: config}
 }
 
@@ -49,7 +49,10 @@ func (c *defaultRPCClient) InvokeSync(addr string, request *Command, responseTyp
 	respChan := make(chan *pendingResponse, 1)
 	defer c.closeChan(request.Opaque)
 	c.reqCache.Store(request.Opaque, respChan)
-	conn.WriteCommand(request)
+	err = conn.WriteCommand(ctx, request)
+	if err != nil {
+		return nil, err
+	}
 
 	select {
 	case resp := <-respChan:
@@ -61,7 +64,7 @@ func (c *defaultRPCClient) InvokeSync(addr string, request *Command, responseTyp
 		}
 		return resp.cmd, nil
 	case <-ctx.Done():
-		return nil, errors.New("timeout")
+		return nil, errors.New("Waiting remote response timeout")
 	}
 }
 
@@ -69,7 +72,7 @@ func (c *defaultRPCClient) GetActiveConn(addr string) (*Conn, error) {
 	return c.getOrCreateConn(addr, c.config, c)
 }
 
-func (c *defaultRPCClient) getOrCreateConn(addr string, config *Config, respHandler ConnEventListener) (*Conn, error) {
+func (c *defaultRPCClient) getOrCreateConn(addr string, config *ClientConfig, respHandler ConnEventListener) (*Conn, error) {
 	conn, ok := c.connMap.Load(addr)
 	if ok {
 		return conn.(*Conn), nil
@@ -106,7 +109,7 @@ func (c *defaultRPCClient) OnMessage(cmd *Command) {
 	}
 }
 
-func (c *defaultRPCClient) OnError(opaque int, err error) {
+func (c *defaultRPCClient) OnError(opaque int32, err error) {
 	ch, ok := c.reqCache.Load(opaque)
 	if ok {
 		defer recover()
