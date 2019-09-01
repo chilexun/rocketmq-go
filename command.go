@@ -4,71 +4,91 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
-type RequestHeader interface {
-	responseType() reflect.Type
-}
+var requestId int32
 
 type Command struct {
-	Code         RequestCode       `json:"code"`
-	Opaque       int32             `json:"opaque"`
-	CustomHeader interface{}       `json:"-"`
-	Version      int               `json:"version"`
-	Body         []byte            `json:"-"`
-	Remark       string            `json:"remark,omitempty"`
-	ExtFields    map[string]string `json:"extFields,omitempty"`
+	Code      int               `json:"code"`
+	Opaque    int32             `json:"opaque"`
+	Version   int               `json:"version"`
+	Body      []byte            `json:"-"`
+	Remark    string            `json:"remark,omitempty"`
+	ExtFields map[string]string `json:"extFields,omitempty"`
 }
 
-type SendMessageRequestHeader struct {
+type SendMessageRequest struct {
 	ProducerGroup     string
 	Topic             string
 	QueueId           int
 	SysFlag           MsgSysFlag
 	BornTimestamp     int64
 	Flag              int
-	Properties        string
+	Properties        map[string]string
 	ReconsumeTimes    int
 	UnitMode          bool
 	Batch             bool
 	MaxReconsumeTimes int
+	Body              []byte
 }
 
-type SendMessageResponseHeader struct {
+func (r *SendMessageRequest) toExtFields() map[string]string {
+	fields := make(map[string]string, 11)
+	fields["producerGroup"] = r.ProducerGroup
+	fields["topic"] = r.Topic
+	fields["queueId"] = strconv.Itoa(r.QueueId)
+	fields["sysFlag"] = strconv.Itoa(int(r.SysFlag))
+	fields["bornTimestamp"] = strconv.FormatInt(r.BornTimestamp, 64)
+	fields["flag"] = strconv.Itoa(r.Flag)
+	fields["properties"] = msgProps2String(r.Properties)
+	fields["reconsumeTimes"] = strconv.Itoa(r.ReconsumeTimes)
+	fields["unitMode"] = strconv.FormatBool(r.UnitMode)
+	fields["batch"] = strconv.FormatBool(r.Batch)
+	fields["maxReconsumeTimes"] = strconv.Itoa(r.MaxReconsumeTimes)
+	return fields
+}
+
+type SendMessageResponse struct {
+	Code          ResponseCode
 	MsgId         string
 	QueueId       int
 	QueueOffset   int64
 	TransactionId string
+	Remark        string
 }
 
 func GetRouteInfo(topic string) Command {
 	header := make(map[string]string, 1)
 	header["topic"] = topic
-	return Command{Code: GET_ROUTEINTO_BY_TOPIC, ExtFields: header}
+	return Command{Opaque: atomic.AddInt32(&requestId, 1), Code: int(GET_ROUTEINTO_BY_TOPIC), ExtFields: header}
 }
 
-func SendMessage(header *SendMessageRequestHeader, body []byte) Command {
-	return Command{Code: SEND_MESSAGE, CustomHeader: header, Body: body}
+func SendMessage(request *SendMessageRequest) Command {
+	return Command{Opaque: atomic.AddInt32(&requestId, 1), Code: int(SEND_MESSAGE), Body: request.Body, ExtFields: request.toExtFields()}
 }
 
 func HeartBeat(data HeartbeatData) Command {
 	body, _ := json.Marshal(data)
-	return Command{Code: HEART_BEAT, Body: body}
+	return Command{Opaque: atomic.AddInt32(&requestId, 1), Code: int(HEART_BEAT), Body: body}
 }
 
-func (c *Command) Encode() ([]byte, error) {
+func EncodeCommand(c *Command, serialType SerializeType) ([]byte, error) {
 	var length int = 4
-	headerData, _ := c.encodeHeader()
+	headerData, err := CmdHeaderCodecs[serialType].Encode(c)
+	if err != nil {
+		return nil, err
+	}
+
 	length += len(headerData)
 	if c.Body != nil {
 		length += len(c.Body)
 	}
 	buffer := new(bytes.Buffer)
 	binary.Write(buffer, binary.BigEndian, int32(length))
-	buffer.Write(markProtocolType(len(headerData), JSON))
+	buffer.Write(markProtocolType(len(headerData), serialType))
 	buffer.Write(headerData)
 	if c.Body != nil {
 		buffer.Write(c.Body)
@@ -76,95 +96,38 @@ func (c *Command) Encode() ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-func Decode(data []byte) (*Command, error) {
+func DecodeCommand(data []byte) (cmd *Command, err error) {
 	buffer := bytes.NewBuffer(data)
 	var length int32
-	err := binary.Read(buffer, binary.BigEndian, &length)
+	err = binary.Read(buffer, binary.BigEndian, &length)
 	if err != nil {
-		return nil, err
+		return
 	}
+
 	var mark int32
 	err = binary.Read(buffer, binary.BigEndian, &mark)
 	if err != nil {
 		return nil, err
 	}
-
 	serialType := SerializeType((mark >> 24) & 0xFF)
 	headerLength := mark & 0xFFFFFF
 	headerData := make([]byte, headerLength)
 	_, err = buffer.Read(headerData)
-	cmd := DecodeHeader(headerData, serialType)
+	if err != nil {
+		return nil, err
+	}
+	cmd, err = CmdHeaderCodecs[serialType].Decode(headerData)
+	if err != nil {
+		return
+	}
 
 	bodyLength := length - 4 - headerLength
 	if bodyLength > 0 {
 		body := make([]byte, bodyLength)
-		buffer.Read(body)
+		_, err = buffer.Read(body)
 		cmd.Body = body
 	}
-
-	return cmd, nil
-}
-
-func (c *Command) ResolveCustomHeader(t reflect.Type) {
-	header := reflect.New(t.Elem()).Elem()
-	for k, v := range c.ExtFields {
-		if f := header.FieldByName(k); f.CanSet() {
-			setFieldValue(f, v)
-		}
-	}
-}
-
-func setFieldValue(field reflect.Value, v string) {
-	switch field.Type().String() {
-	case "string":
-		field.SetString(v)
-	case "int", "int16", "int32", "int64":
-		if i, err := strconv.Atoi(v); err == nil {
-			field.SetInt(int64(i))
-		}
-	case "uint", "uint16", "uint32", "uint64":
-		if i, err := strconv.Atoi(v); err == nil {
-			field.SetUint(uint64(i))
-		}
-	case "float32":
-		if f, err := strconv.ParseFloat(v, 32); err == nil {
-			field.SetFloat(float64(f))
-		}
-	case "float64":
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			field.SetFloat(float64(f))
-		}
-	case "bool":
-		if b, err := strconv.ParseBool(v); err == nil {
-			field.SetBool(b)
-		}
-	}
-}
-
-func (c *Command) encodeHeader() ([]byte, error) {
-	if c.CustomHeader != nil {
-		elemT := reflect.TypeOf(c.CustomHeader).Elem()
-		elemV := reflect.ValueOf(c.CustomHeader).Elem()
-		for i := 0; i < elemT.NumField(); i++ {
-			f := elemT.Field(i)
-			c.ExtFields[lowerFirstCh(f.Name)] = CoerceString(elemV.FieldByName(f.Name).InterfaceData())
-		}
-	}
-	return json.Marshal(c)
-}
-
-func lowerFirstCh(str string) string {
-	return strings.ToLower(str[:1]) + str[1:]
-}
-
-func upperFirstCh(str string) string {
-	return strings.ToUpper(str[:1]) + str[1:]
-}
-
-func DecodeHeader(data []byte, serialType SerializeType) *Command {
-	cmd := new(Command)
-	json.Unmarshal([]byte{}, cmd)
-	return cmd
+	return
 }
 
 func markProtocolType(source int, serialType SerializeType) []byte {
@@ -174,4 +137,15 @@ func markProtocolType(source int, serialType SerializeType) []byte {
 	result[2] = (byte)((source >> 8) & 0xFF)
 	result[3] = (byte)(source & 0xFF)
 	return result
+}
+
+func msgProps2String(props map[string]string) string {
+	var builder strings.Builder
+	for k, v := range props {
+		builder.WriteString(k)
+		builder.WriteByte(NameValueSeparator)
+		builder.WriteString(v)
+		builder.WriteByte(PropertySeparator)
+	}
+	return builder.String()
 }

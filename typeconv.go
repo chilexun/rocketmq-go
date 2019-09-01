@@ -180,3 +180,40 @@ func ValueCompare(v1 reflect.Value, v2 reflect.Value) (result int, err error) {
 	}
 	return
 }
+
+func ResolveStruct(fields map[string]string, t reflect.Type) reflect.Value {
+	header := reflect.New(t).Elem()
+	for k, v := range fields {
+		if f := header.FieldByName(k); f.CanSet() {
+			setFieldValue(f, v)
+		}
+	}
+	return header
+}
+
+func setFieldValue(field reflect.Value, v string) {
+	switch field.Type().String() {
+	case "string":
+		field.SetString(v)
+	case "int", "int16", "int32", "int64":
+		if i, err := strconv.Atoi(v); err == nil {
+			field.SetInt(int64(i))
+		}
+	case "uint", "uint16", "uint32", "uint64":
+		if i, err := strconv.Atoi(v); err == nil {
+			field.SetUint(uint64(i))
+		}
+	case "float32":
+		if f, err := strconv.ParseFloat(v, 32); err == nil {
+			field.SetFloat(float64(f))
+		}
+	case "float64":
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			field.SetFloat(float64(f))
+		}
+	case "bool":
+		if b, err := strconv.ParseBool(v); err == nil {
+			field.SetBool(b)
+		}
+	}
+}

@@ -29,7 +29,6 @@ type MQClient struct {
 	clientID        string
 	config          *ClientConfig
 	rpcClient       RPCClient
-	fastRPCClient   RPCClient
 	status          ServiceState
 	executer        *TimeWheel
 	hbState         int32
@@ -53,12 +52,11 @@ func GetClientInstance(config *ClientConfig, instanceName string) *MQClient {
 	}
 
 	instance := &MQClient{
-		clientID:      clientID,
-		config:        config,
-		rpcClient:     NewRPCClient(config),
-		fastRPCClient: NewRPCClient(config),
-		status:        CREATE_JUST,
-		executer:      NewTimeWheel(time.Second, 120),
+		clientID:  clientID,
+		config:    config,
+		rpcClient: NewRPCClient(config),
+		status:    CREATE_JUST,
+		executer:  NewTimeWheel(time.Second, 120),
 	}
 	value, ok = clientMap.LoadOrStore(clientID, instance)
 	if ok {
@@ -96,7 +94,6 @@ func (this *MQClient) Shutdown() {
 	if atomic.CompareAndSwapInt32(&this.status, RUNNING, SHUTDOWN_ALREADY) {
 		this.executer.Stop()
 		this.rpcClient.CloseAllConns()
-		this.fastRPCClient.CloseAllConns()
 	}
 }
 
@@ -108,9 +105,20 @@ func (client *MQClient) DecrReference() int32 {
 	return atomic.AddInt32(&client.refCount, -1)
 }
 
-func (client *MQClient) SendMessageRequest(brokerAddr string, msg *Message, mq *MessageQueue, cmd *Command, timeout time.Duration) (*Command, error) {
+//SendMessageRequest accept a msg request and return a send result response
+func (client *MQClient) SendMessageRequest(brokerAddr string, mq *MessageQueue,
+	request *SendMessageRequest, timeout time.Duration) (*SendMessageResponse, error) {
 	client.usedTopics.Store(mq.Topic, true)
-	return client.rpcClient.InvokeSync(brokerAddr, cmd, reflect.TypeOf(new(SendMessageResponseHeader)).Elem(), timeout)
+	cmd := SendMessage(request)
+	respCmd, err := client.rpcClient.InvokeSync(brokerAddr, &cmd, timeout)
+	if err != nil {
+		return nil, err
+	}
+	respValue := ResolveStruct(respCmd.ExtFields, reflect.TypeOf((*SendMessageResponse)(nil)).Elem())
+	response := respValue.Interface().(SendMessageResponse)
+	response.Code = ResponseCode(respCmd.Code)
+	response.Remark = respCmd.Remark
+	return &response, nil
 }
 
 func (this *MQClient) startScheduledTask() {
@@ -127,8 +135,8 @@ func (this *MQClient) SendHeartbeatToBrokers() {
 		defer atomic.StoreInt32(&this.hbState, 0)
 		this.brokerMap.Range(func(k interface{}, v interface{}) bool {
 			brokers := v.(map[int]string)
-			for brokerId, brokerAddr := range brokers {
-				if brokerId == 1 {
+			for brokerID, brokerAddr := range brokers {
+				if brokerID == 1 {
 					this.sendHeartbeatToBroker(brokerAddr)
 				}
 			}
@@ -148,7 +156,7 @@ func (this *MQClient) sendHeartbeatToBroker(brokerAddr string) {
 		heartbeat.producerDataSet[i] = ProducerData{group}
 	}
 	cmd := HeartBeat(heartbeat)
-	resp, err := this.rpcClient.InvokeSync(brokerAddr, &cmd, nil, 3*time.Second)
+	resp, err := this.rpcClient.InvokeSync(brokerAddr, &cmd, 3*time.Second)
 	if err != nil {
 		//log error
 		return
@@ -226,7 +234,7 @@ func (client *MQClient) syncTopicFromNameserv(topic string) {
 		//log no nameserv error
 		return
 	}
-	resp, err := client.rpcClient.InvokeSync(addr, &req, nil, 3*time.Second)
+	resp, err := client.rpcClient.InvokeSync(addr, &req, 3*time.Second)
 	if err != nil {
 		//log error
 		return

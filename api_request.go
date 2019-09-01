@@ -3,13 +3,12 @@ package mqclient
 import (
 	"context"
 	"errors"
-	"reflect"
 	"sync"
 	"time"
 )
 
 type RPCClient interface {
-	InvokeSync(addr string, request *Command, responseType reflect.Type, timeout time.Duration) (*Command, error)
+	InvokeSync(addr string, request *Command, timeout time.Duration) (*Command, error)
 	GetActiveConn(addr string) (*Conn, error)
 	CloseAllConns()
 }
@@ -30,7 +29,7 @@ func NewRPCClient(config *ClientConfig) RPCClient {
 	return &defaultRPCClient{config: config}
 }
 
-func (c *defaultRPCClient) InvokeSync(addr string, request *Command, responseType reflect.Type, timeout time.Duration) (*Command, error) {
+func (c *defaultRPCClient) InvokeSync(addr string, request *Command, timeout time.Duration) (*Command, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer func() {
 		cancel()
@@ -39,11 +38,8 @@ func (c *defaultRPCClient) InvokeSync(addr string, request *Command, responseTyp
 	if err != nil {
 		return nil, err
 	}
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return nil, errors.New("connect remote timeout")
-	default:
-		break
 	}
 
 	respChan := make(chan *pendingResponse, 1)
@@ -58,9 +54,6 @@ func (c *defaultRPCClient) InvokeSync(addr string, request *Command, responseTyp
 	case resp := <-respChan:
 		if resp.err != nil {
 			return nil, resp.err
-		}
-		if responseType != nil {
-			resp.cmd.ResolveCustomHeader(responseType)
 		}
 		return resp.cmd, nil
 	case <-ctx.Done():

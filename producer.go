@@ -182,39 +182,47 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 	if brokerAddr == "" {
 		return nil, errors.New(fmt.Sprint("The broker [s%] not exist", mq.BrokerName))
 	}
-	msg.SetUniqID()
-	var rawBody []byte
+
+	if msg.GetUniqID() == "" {
+		msg.SetUniqID(GenerateUniqMsgID())
+	}
 	var sysFlag MsgSysFlag
 	if len(msg.Body) >= p.config.CompressMsgBodyOverHowmuch {
-		rawBody = msg.CompressBody(p.config.ZipCompressLevel)
-		sysFlag |= COMPRESSED_FLAG
-		defer func() { msg.Body = rawBody }()
+		compressBody, err := Compress(msg.Body, p.config.ZipCompressLevel)
+		if err == nil {
+			defer func(rawBody []byte) { msg.Body = rawBody }(msg.Body)
+			msg.Body = compressBody
+			sysFlag |= COMPRESSED_FLAG
+		} else {
+			logger.Warn("Compress message body error:" + err.Error())
+		}
 	}
 	if msg.Properties[PROPERTY_TRANSACTION_PREPARED] == "true" {
 		sysFlag |= TRANSACTION_PREPARED_TYPE
 	}
-	requestHeader := &SendMessageRequestHeader{
+	request := &SendMessageRequest{
 		ProducerGroup:  p.producerGroup,
 		Topic:          mq.Topic,
 		QueueId:        mq.QueueId,
 		SysFlag:        sysFlag,
 		BornTimestamp:  time.Now().UnixNano() / 1e6,
 		Flag:           msg.Flag,
-		Properties:     msg.Properties2String(),
+		Properties:     msg.Properties,
 		ReconsumeTimes: 0,
+		Body:           msg.Body,
 	}
-	if strings.HasPrefix(requestHeader.Topic, "%RETRY%") {
-		setRetryHeader(requestHeader, msg.Properties)
+	if strings.HasPrefix(request.Topic, "%RETRY%") {
+		setRetryHeader(request, msg.Properties)
 	}
 
-	cmd := SendMessage(requestHeader, msg.Body)
-	response, err := p.mqClient.SendMessageRequest(brokerAddr, msg, mq, &cmd, timeout)
+	// cmd := SendMessage(requestHeader, msg.Body)
+	response, err := p.mqClient.SendMessageRequest(brokerAddr, mq, request, timeout)
 	if err != nil {
 		return nil, err
 	}
 
 	sendResult := &SendResult{}
-	switch code := ResponseCode(response.Code); code {
+	switch code := response.Code; code {
 	case SUCCESS:
 		sendResult.SendStatus = SEND_OK
 	case FLUSH_DISK_TIMEOUT:
@@ -226,16 +234,16 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 	default:
 		return nil, MQBrokerError{code, response.Remark}
 	}
-	respHeader := response.CustomHeader.(*SendMessageResponseHeader)
+
 	sendResult.MsgId = msg.GetUniqID()
-	sendResult.OffsetMsgId = respHeader.MsgId
-	sendResult.MsgQueue = MessageQueue{mq.Topic, mq.BrokerName, respHeader.QueueId}
-	sendResult.QueueOffset = respHeader.QueueOffset
-	sendResult.TransactionId = respHeader.TransactionId
+	sendResult.OffsetMsgId = response.MsgId
+	sendResult.MsgQueue = MessageQueue{mq.Topic, mq.BrokerName, response.QueueId}
+	sendResult.QueueOffset = response.QueueOffset
+	sendResult.TransactionId = response.TransactionId
 	return sendResult, nil
 }
 
-func setRetryHeader(header *SendMessageRequestHeader, msgProps map[string]string) {
+func setRetryHeader(header *SendMessageRequest, msgProps map[string]string) {
 	if reconsumeTimes := msgProps[PROPERTY_RECONSUME_TIME]; reconsumeTimes != "" {
 		header.ReconsumeTimes, _ = strconv.Atoi(reconsumeTimes)
 		delete(msgProps, PROPERTY_RECONSUME_TIME)

@@ -1,5 +1,17 @@
 package mqclient
 
+import (
+	"bytes"
+	"encoding/binary"
+	"encoding/hex"
+	"math/rand"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
 const (
 	PROPERTY_KEYS                              string = "KEYS"
 	PROPERTY_TAGS                              string = "TAGS"
@@ -28,7 +40,43 @@ const (
 	PROPERTY_CHECK_IMMUNITY_TIME_IN_SECONDS    string = "CHECK_IMMUNITY_TIME_IN_SECONDS"
 
 	KEY_SEPARATOR string = " "
+
+	NameValueSeparator byte = 1
+	PropertySeparator  byte = 2
 )
+
+const (
+	MsgIDLength = 4 + 2 + 4 + 4 + 2
+)
+
+var fixMsgIDPrefix string
+var startTime time.Time
+var nextStartTime time.Time
+var mutex sync.Mutex
+var counter int32
+
+func init() {
+	buf := bytes.NewBuffer(make([]byte, 10))
+	ipv4, _ := GetIPv4(GetIPAddr())
+	for _, b := range ipv4 {
+		buf.WriteByte(b)
+	}
+	binary.Write(buf, binary.BigEndian, int16(os.Getpid()))
+	binary.Write(buf, binary.BigEndian, rand.Int31())
+	fixMsgIDPrefix = buf.String()
+	resetStartTime()
+}
+
+func resetStartTime() {
+	mutex.Lock()
+	defer mutex.Unlock()
+	now := time.Now()
+	if !now.After(nextStartTime) {
+		return
+	}
+	startTime = time.Date(now.Year(), now.Month(), 0, 0, 0, 0, 0, time.Local)
+	nextStartTime = startTime.AddDate(0, 1, 0)
+}
 
 type Message struct {
 	Topic         string
@@ -53,18 +101,24 @@ func (m *Message) Validate() error {
 	return nil
 }
 
-func (m *Message) SetUniqID() {
-
+func (m *Message) SetUniqID(id string) {
+	m.Properties[PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX] = id
 }
 
 func (m *Message) GetUniqID() string {
-	return ""
+	return m.Properties[PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX]
 }
 
-func (m *Message) CompressBody(compressLevel int) (rawBody []byte) {
-	return nil
-}
-
-func (m *Message) Properties2String() string {
-	return ""
+func GenerateUniqMsgID() string {
+	var builder strings.Builder
+	builder.WriteString(fixMsgIDPrefix)
+	buf := bytes.NewBuffer(make([]byte, 4+2))
+	if time.Now().After(nextStartTime) {
+		resetStartTime()
+	}
+	gap := time.Now().Sub(startTime).Nanoseconds() / 1e6
+	binary.Write(buf, binary.BigEndian, int32(gap))
+	binary.Write(buf, binary.BigEndian, int16(atomic.AddInt32(&counter, 1)))
+	builder.WriteString(hex.Dump(buf.Bytes()))
+	return builder.String()
 }

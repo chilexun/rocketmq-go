@@ -21,8 +21,9 @@ type ClientConfig struct {
 	WriteTimeout            time.Duration `min:"100ms" max:"5m" default:"1s"`
 	LocalAddr               net.Addr
 	TLSConfig               *tls.Config
-	SendChanSize            int `default:"100"`
-	RcvChanSize             int `default:"100"`
+	SendChanSize            int  `default:"100"`
+	RcvChanSize             int  `default:"100"`
+	SerializeType           byte `min:"0" max:"1"`
 	initialized             bool
 }
 

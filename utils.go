@@ -1,6 +1,8 @@
 package mqclient
 
 import (
+	"bytes"
+	"compress/flate"
 	"net"
 	"runtime"
 	"strconv"
@@ -18,7 +20,7 @@ func GetIPAddr() string {
 			if idx := strings.IndexByte(ip, ':'); idx > 0 {
 				ip = ip[:idx]
 			}
-			if b, v4 := IsIpv4(ip); v4 && IsValidIp(b) {
+			if b, v4 := GetIPv4(ip); v4 && IsValidIp(b) {
 				if !IsInternalAddr(b) {
 					return ip
 				} else {
@@ -33,7 +35,7 @@ func GetIPAddr() string {
 	panic(err)
 }
 
-func IsIpv4(ipStr string) ([]byte, bool) {
+func GetIPv4(ipStr string) ([]byte, bool) {
 	splited := strings.Split(ipStr, ".")
 	if len(splited) != 4 {
 		return nil, false
@@ -91,6 +93,20 @@ func IsInternalAddr(ip []byte) bool {
 		}
 	}
 	return false
+}
+
+func Compress(body []byte, compressLevel int) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	w, err := flate.NewWriter(buf, compressLevel)
+	if err != nil {
+		return nil, err
+	}
+	_, err = w.Write(body)
+	err = w.Close()
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 type spinLock uint32

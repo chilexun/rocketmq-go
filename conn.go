@@ -1,6 +1,8 @@
 package mqclient
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -98,6 +100,8 @@ func (c *Conn) Write(bytes []byte) (int, error) {
 	return c.conn.Write(bytes)
 }
 
+//WriteCommand encode the command and write to the connection
+//the operation is async
 func (c *Conn) WriteCommand(ctx context.Context, cmd *Command) (err error) {
 	if atomic.LoadInt32(&c.closeFlag) == 1 {
 		return errors.New("Connect had been closed")
@@ -126,15 +130,16 @@ func (c *Conn) readLoop() {
 		c.wg.Done()
 		c.Close()
 	}()
+	reader := bufio.NewReader(c)
 	for atomic.LoadInt32(&c.closeFlag) == 0 {
 		var msgSize int32
 		var buf []byte
 		// message size
-		err := binary.Read(c, binary.BigEndian, &msgSize)
+		err := binary.Read(reader, binary.BigEndian, &msgSize)
 		if err == nil {
 			// message binary data
 			buf = make([]byte, msgSize)
-			_, err = io.ReadFull(c, buf)
+			_, err = io.ReadFull(reader, buf)
 		}
 		if err != nil {
 			if err == io.EOF && atomic.LoadInt32(&c.closeFlag) == 1 {
@@ -142,12 +147,11 @@ func (c *Conn) readLoop() {
 			}
 			if !strings.Contains(err.Error(), "use of closed network connection") {
 				c.respHandler.OnIOError(c, err)
-				return
 			}
 			return
 		}
-		response, _ := Decode(buf)
-		if response != nil {
+		response, err := DecodeCommand(buf)
+		if err == nil {
 			c.respChan <- response
 		}
 	}
@@ -166,19 +170,22 @@ func (c *Conn) writeLoop() {
 			logger.Warnf("Command discard since timeout, %d", cmdHolder.cmd.Opaque)
 			continue
 		}
-		data, err := cmdHolder.cmd.Encode()
+
+		data, err := EncodeCommand(cmdHolder.cmd, SerializeType(c.config.SerializeType))
 		if err == nil {
-			//todo: use bufio
-			err = binary.Write(c, binary.BigEndian, int32(len(data)))
-			if err == nil {
-				_, err = c.Write(data)
-			}
+			buf := bytes.NewBuffer(make([]byte, len(data)+4))
+			binary.Write(buf, binary.BigEndian, int32(len(data)))
+			buf.Write(data)
+
+			_, err = buf.WriteTo(c)
 			if err != nil && atomic.LoadInt32(&c.closeFlag) != 1 {
 				logger.Warnf("Command discard since conn closed, %d", cmdHolder.cmd.Opaque)
 				return
 			}
 		}
-		c.respHandler.OnError(cmdHolder.cmd.Opaque, err)
+		if err != nil {
+			c.respHandler.OnError(cmdHolder.cmd.Opaque, err)
+		}
 	}
 }
 

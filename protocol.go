@@ -1,5 +1,7 @@
 package mqclient
 
+import "encoding/json"
+
 type RequestCode int
 
 const (
@@ -100,19 +102,42 @@ const (
 type SerializeType byte
 
 const (
-	JSON SerializeType = iota
-	ROCKETMQ
+	SerialTypeJson     SerializeType = 0
+	SerialTypeRocketMQ SerializeType = 1
 )
 
-type Codec interface {
+var CmdHeaderCodecs = [2]CmdHeaderCodec{
+	new(jsonCodec),
+	new(rocketMQCodec),
+}
+
+type CmdHeaderCodec interface {
 	Encode(cmd *Command) ([]byte, error)
 	Decode([]byte) (*Command, error)
 }
 
-type JsonCodec struct {
+type jsonCodec struct {
 }
 
-type RocketMQCodec struct {
+func (c *jsonCodec) Encode(cmd *Command) ([]byte, error) {
+	return json.Marshal(cmd)
+}
+
+func (c *jsonCodec) Decode(b []byte) (cmd *Command, err error) {
+	cmd = new(Command)
+	err = json.Unmarshal(b, cmd)
+	return
+}
+
+type rocketMQCodec struct {
+}
+
+func (c *rocketMQCodec) Encode(cmd *Command) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *rocketMQCodec) Decode(b []byte) (*Command, error) {
+	return nil, nil
 }
 
 type ProducerData struct {
