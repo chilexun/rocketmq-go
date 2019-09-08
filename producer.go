@@ -77,7 +77,7 @@ func NewProducer(producerGroup string, config *ProducerConfig) (Producer, error)
 	p := &defaultProducer{
 		producerGroup:    producerGroup,
 		config:           *config,
-		status:           CREATE_JUST,
+		status:           CreateJust,
 		instanceName:     instanceName,
 		mqSelectStrategy: NewStrategy(),
 	}
@@ -85,14 +85,14 @@ func NewProducer(producerGroup string, config *ProducerConfig) (Producer, error)
 }
 
 func (p *defaultProducer) Start() error {
-	if !atomic.CompareAndSwapInt32(&p.status, CREATE_JUST, START_FAILED) {
+	if !atomic.CompareAndSwapInt32(&p.status, CreateJust, StartFailed) {
 		return errors.New("The producer service state not OK, maybe started once")
 	}
 	if p.producerGroup != CLIENT_INNER_PRODUCER_GROUP && p.instanceName == DEFAULT_INSTANCE_NAME {
 		p.instanceName = strconv.Itoa(os.Getpid())
 	}
 	if !registerProducer(p.producerGroup, p) {
-		atomic.StoreInt32(&p.status, CREATE_JUST)
+		atomic.StoreInt32(&p.status, CreateJust)
 		return errors.New("The producer group has been created before")
 	}
 
@@ -103,24 +103,24 @@ func (p *defaultProducer) Start() error {
 		return err
 	}
 
-	atomic.StoreInt32(&p.status, RUNNING)
+	atomic.StoreInt32(&p.status, Running)
 	p.mqClient.IncrReference()
 	p.mqClient.SendHeartbeatToBrokers()
 	return nil
 }
 
 func (p *defaultProducer) Shutdown() {
-	if atomic.LoadInt32(&p.status) == RUNNING {
+	if atomic.LoadInt32(&p.status) == Running {
 		unregisterProducer(p.producerGroup)
 		p.mqClient.DecrReference()
 		p.mqClient.Shutdown()
-		atomic.StoreInt32(&p.status, SHUTDOWN_ALREADY)
+		atomic.StoreInt32(&p.status, ShutdownAlready)
 	}
 }
 
 func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, error) {
 	failResult := SendResult{SendStatus: SEND_FAIL}
-	if p.status != RUNNING {
+	if p.status != Running {
 		return failResult, errors.New("The producer service state not OK")
 	}
 	if err := msg.Validate(); err != nil {

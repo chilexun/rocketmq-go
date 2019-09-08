@@ -22,6 +22,8 @@ type ConnEventListener interface {
 	OnError(opaque int32, err error)
 	//OnIOError is invoked when tcp conn error
 	OnIOError(*Conn, error)
+	//OnClosed is invoked when conn is closed
+	OnClosed(*Conn)
 }
 
 type commandHolder struct {
@@ -82,8 +84,17 @@ func (c *Conn) Close() (err error) {
 		c.wg.Wait()
 		close(c.cmdChan)
 		close(c.respChan)
+		c.respHandler.OnClosed(c)
 	})
 	return
+}
+
+func (c *Conn) IsActive() bool {
+	return atomic.LoadInt32(&c.closeFlag) == 0
+}
+
+func (c *Conn) GetAddr() string {
+	return c.addr
 }
 
 func (c *Conn) Read(p []byte) (int, error) {

@@ -10,9 +10,11 @@ import (
 type RPCClient interface {
 	InvokeSync(addr string, request *Command, timeout time.Duration) (*Command, error)
 	GetActiveConn(addr string) (*Conn, error)
+	IsConnActive(addr string) bool
 	CloseAllConns()
 }
 
+//todo : remove conn from connMap if conn closed
 type defaultRPCClient struct {
 	config   *ClientConfig
 	reqCache sync.Map
@@ -65,15 +67,23 @@ func (c *defaultRPCClient) GetActiveConn(addr string) (*Conn, error) {
 	return c.getOrCreateConn(addr, c.config, c)
 }
 
+func (c *defaultRPCClient) IsConnActive(addr string) bool {
+	conn, ok := c.connMap.Load(addr)
+	if ok && conn.(*Conn).IsActive() {
+		return true
+	}
+	return false
+}
+
 func (c *defaultRPCClient) getOrCreateConn(addr string, config *ClientConfig, respHandler ConnEventListener) (*Conn, error) {
 	conn, ok := c.connMap.Load(addr)
-	if ok {
+	if ok && conn.(*Conn).IsActive() {
 		return conn.(*Conn), nil
 	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	conn, ok = c.connMap.Load(addr)
-	if ok {
+	if ok && conn.(*Conn).IsActive() {
 		return conn.(*Conn), nil
 	}
 	newConn := NewConn(addr, config, respHandler)
@@ -112,6 +122,19 @@ func (c *defaultRPCClient) OnError(opaque int32, err error) {
 
 func (c *defaultRPCClient) OnIOError(conn *Conn, err error) {
 
+}
+
+func (c *defaultRPCClient) OnClosed(conn *Conn) {
+	addr := conn.GetAddr()
+	cached, ok := c.connMap.Load(addr)
+	if ok && cached.(*Conn) == conn {
+		c.lock.Lock()
+		defer c.lock.Unlock()
+		cached, ok = c.connMap.Load(addr)
+		if ok && cached.(*Conn) == conn {
+			c.connMap.Delete(addr)
+		}
+	}
 }
 
 func (c *defaultRPCClient) closeChan(requestID int32) {
