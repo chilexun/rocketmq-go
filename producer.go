@@ -153,7 +153,7 @@ func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 		case *MQBrokerError:
 			brokerErr := err.(MQBrokerError)
 			switch brokerErr.Code {
-			case TOPIC_NOT_EXIST, SERVICE_NOT_AVAILABLE, SYSTEM_ERROR, NO_PERMISSION, NO_BUYER_ID, NOT_IN_CURRENT_UNIT:
+			case TopicNotExist, ServiceNotAvailable, SystemError, NoPermission, NoBuyeID, NotInCurrentUnit:
 				continue
 			default:
 				if sendResult != nil {
@@ -190,13 +190,13 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 		if err == nil {
 			defer func(rawBody []byte) { msg.Body = rawBody }(msg.Body)
 			msg.Body = compressBody
-			sysFlag |= COMPRESSED_FLAG
+			sysFlag |= CompressedFlag
 		} else {
 			logger.Warn("Compress message body error:" + err.Error())
 		}
 	}
 	if msg.Properties[MessageTransactionPrepared] == "true" {
-		sysFlag |= TRANSACTION_PREPARED_TYPE
+		sysFlag |= TransactionPreparedType
 	}
 	request := &SendMessageRequest{
 		ProducerGroup:  p.producerGroup,
@@ -221,13 +221,13 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 
 	sendResult := new(SendResult)
 	switch code := response.Code; code {
-	case SUCCESS:
+	case Success:
 		sendResult.SendStatus = SendOK
-	case FLUSH_DISK_TIMEOUT:
+	case FlushDiskTimeout:
 		sendResult.SendStatus = BrokerFlushDiskTimeout
-	case FLUSH_SLAVE_TIMEOUT:
+	case FlushSlaveTimeout:
 		sendResult.SendStatus = BrokerFlushSlaveTimeout
-	case SLAVE_NOT_AVAILABLE:
+	case SlaveNotAvailable:
 		sendResult.SendStatus = BrokerSlaveNotAvailable
 	default:
 		return nil, MQBrokerError{code, response.Remark}

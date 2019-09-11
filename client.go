@@ -173,7 +173,7 @@ func (client *MQClient) sendHeartbeatToBroker(brokerName string, brokerAddr stri
 	if err != nil {
 		logger.Errorf("Send heartbeat to broker %s(%s), Error:%s", brokerName, brokerAddr, err)
 		return
-	} else if ResponseCode(resp.Code) != SUCCESS {
+	} else if ResponseCode(resp.Code) != Success {
 		logger.Errorf("Receive invalid heartbeat response from broker %s(%s), Error Code:%d", brokerName, brokerAddr, resp.Code)
 		return
 	}
@@ -255,9 +255,9 @@ func (client *MQClient) syncTopicFromNameserv(topic string) {
 		return
 	}
 	code, body := ResponseCode(resp.Code), resp.Body
-	if code == TOPIC_NOT_EXIST {
+	if code == TopicNotExist {
 		logger.Errorf("Get route failed since TOPIC NOT EXIST, topic:%s", topic)
-	} else if code == SUCCESS {
+	} else if code == Success {
 		routeData := new(TopicRouteData)
 		err := json.Unmarshal(body, &routeData)
 		if err != nil {

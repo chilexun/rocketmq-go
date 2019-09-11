@@ -2,115 +2,129 @@ package mqclient
 
 import "encoding/json"
 
+//Request code type
 type RequestCode int
 
+//Enum of request code
 const (
-	SEND_MESSAGE RequestCode = iota + 10
-	PULL_MESSAGE
-	QUERY_MESSAGE
-	QUERY_BROKER_OFFSET
-	QUERY_CONSUMER_OFFSET
-	UPDATE_CONSUMER_OFFSET
-	UPDATE_AND_CREATE_TOPIC RequestCode = 17
-	GET_ALL_TOPIC_CONFIG    RequestCode = iota + 21
-	GET_TOPIC_CONFIG_LIST
-	GET_TOPIC_NAME_LIST
+	SendMessageReq RequestCode = iota + 10
+	PullMessageReq
+	QueryMessageReq
+	QueryBrokerOffsetReq
+	QueryConsumerOffsetReq
+	UpdateConsumerOffsetReq
+	UpdateAndCreateTopicReq RequestCode = 17
+	GetAllTopicConfigReq    RequestCode = iota + 21
+	GetTopicConfigListReq
+	GetTopicNameListReq
 	_
-	UPDATE_BROKER_CONFIG
-	GET_BROKER_CONFIG
-	TRIGGER_DELETE_FILES
-	GET_BROKER_RUNTIME_INFO
-	SEARCH_OFFSET_BY_TIMESTAMP
-	GET_MAX_OFFSET
-	GET_MIN_OFFSET
-	GET_EARLIEST_MSG_STORETIME
-	VIEW_MESSAGE_BY_ID
-	HEART_BEAT
-	UNREGISTER_CLIENT
-	CONSUMER_SEND_MSG_BACK
-	END_TRANSACTION
-	GET_CONSUMER_LIST_BY_GROUP
-	CHECK_TRANSACTION_STATE
-	NOTIFY_CONSUMER_IDS_CHANGED
-)
-const (
-	PUT_KV_CONFIG RequestCode = iota + 100
-	GET_KV_CONFIG
-	DELETE_KV_CONFIG
-	REGISTER_BROKER
-	UNREGISTER_BROKER
-	GET_ROUTEINTO_BY_TOPIC
-	GET_BROKER_CLUSTER_INFO
+	UpdateBrokerConfigReq
+	GetBrokerConfigReq
+	TriggerDeleteFilesReq
+	GetBrokerRuntimeInfoReq
+	SearchOffsetByTimestampReq
+	GetMaxOffsetReq
+	GetMinOffsetReq
+	GetEarliestMsgStoreTimeReq
+	ViewMessageByIDReq
+	HeartBeatReq
+	UnRegisterClientReq
+	ConsumerSendMsgBackReq
+	EndTransactionReq
+	GetConsumerListByGroupReq
+	CheckTransactionStateReq
+	NotifyConsumerIDsChangedReq
 )
 
+//Enum of KV request code
+const (
+	PutKVConfigReq RequestCode = iota + 100
+	GetKVConfigReq
+	DeleteKVConfigReq
+	RegisterBrokerReq
+	UnRegisterBrokerReq
+	GetRouteInfoByTopicReq
+	GetBrokerClusterInfoReq
+)
+
+//Response code type
 type ResponseCode int
 
+//Enum of Response code
 const (
-	SUCCESS ResponseCode = iota
-	SYSTEM_ERROR
-	SYSTEM_BUSY
-	REQUEST_CODE_NOT_SUPPORTED
-	TRANSACTION_FAILED
+	Success ResponseCode = iota
+	SystemError
+	SystemBusy
+	RequestCodeNotSupported
+	TransactionFailed
 	_
 	_
 	_
 	_
 	_
-	FLUSH_DISK_TIMEOUT
-	SLAVE_NOT_AVAILABLE
-	FLUSH_SLAVE_TIMEOUT
-	MESSAGE_ILLEGAL
-	SERVICE_NOT_AVAILABLE
-	VERSION_NOT_SUPPORTED
-	NO_PERMISSION
-	TOPIC_NOT_EXIST
-	TOPIC_EXIST_ALREADY
-	PULL_NOT_FOUND
-	PULL_RETRY_IMMEDIATELY
-	PULL_OFFSET_MOVED
-	QUERY_NOT_FOUND
-	SUBSCRIPTION_PARSE_FAILED
-	SUBSCRIPTION_NOT_EXIST
-	SUBSCRIPTION_NOT_LATEST
-	SUBSCRIPTION_GROUP_NOT_EXIST
-	FILTER_DATA_NOT_EXIST
-	FILTER_DATA_NOT_LATEST
-)
-const (
-	TRANSACTION_SHOULD_COMMIT ResponseCode = iota + 200
-	TRANSACTION_SHOULD_ROLLBACK
-	TRANSACTION_STATE_UNKNOW
-	TRANSACTION_STATE_GROUP_WRONG
-	NO_BUYER_ID
-	NOT_IN_CURRENT_UNIT
-	CONSUMER_NOT_ONLINE
-	CONSUME_MSG_TIMEOUT
-	NO_MESSAGE
+	FlushDiskTimeout
+	SlaveNotAvailable
+	FlushSlaveTimeout
+	MessageIllegal
+	ServiceNotAvailable
+	VersionNotSupported
+	NoPermission
+	TopicNotExist
+	TopicExistAlready
+	PullNotFound
+	PullRetryImmediately
+	PullOffsetMoved
+	QueryNotFound
+	SubscriptionParseFailed
+	SubscriptionNotExist
+	SubscriptionNotLatest
+	SubscriptionGroupNotExist
+	FilterDataNotExist
+	FilterDataNotLastest
 )
 
+//Enum of transaction response code
+const (
+	TransactionShouldCommit ResponseCode = iota + 200
+	TransactionShouldRollback
+	TransactionStateUnknown
+	TransactionStateGroupWrong
+	NoBuyeID
+	NotInCurrentUnit
+	ConsumerNotOnline
+	ConsumeMsgTimeout
+	NoMessage
+)
+
+//Message flag type
 type MsgSysFlag int
 
+//Enum of message flag
 const (
-	COMPRESSED_FLAG           MsgSysFlag = 0x1
-	MULTI_TAGS_FLAG           MsgSysFlag = 0x1 << 1
-	TRANSACTION_NOT_TYPE      MsgSysFlag = 0
-	TRANSACTION_PREPARED_TYPE MsgSysFlag = 0x1 << 2
-	TRANSACTION_COMMIT_TYPE   MsgSysFlag = 0x2 << 2
-	TRANSACTION_ROLLBACK_TYPE MsgSysFlag = 0x3 << 2
+	CompressedFlag          MsgSysFlag = 0x1
+	MultiTagsFlag           MsgSysFlag = 0x1 << 1
+	TransactionNotType      MsgSysFlag = 0
+	TransactionPreparedType MsgSysFlag = 0x1 << 2
+	TransactionCommitType   MsgSysFlag = 0x2 << 2
+	TransactionRollbackType MsgSysFlag = 0x3 << 2
 )
 
+//Command serialize type
 type SerializeType byte
 
+//Enum of command serialize type
 const (
 	SerialTypeJson     SerializeType = 0
 	SerialTypeRocketMQ SerializeType = 1
 )
 
-var CmdHeaderCodecs = [2]CmdHeaderCodec{
-	new(jsonCodec),
-	new(rocketMQCodec),
+//Supported CmdHeaderCodec implements
+var CmdHeaderCodecs = map[SerializeType]CmdHeaderCodec{
+	SerialTypeJson:     new(jsonCodec),
+	SerialTypeRocketMQ: new(rocketMQCodec),
 }
 
+//CmdHeaderCodec is the interface that wraps encode and decode method to Command
 type CmdHeaderCodec interface {
 	Encode(cmd *Command) ([]byte, error)
 	Decode([]byte) (*Command, error)
@@ -119,10 +133,12 @@ type CmdHeaderCodec interface {
 type jsonCodec struct {
 }
 
+//Encode the command using json protocol
 func (c *jsonCodec) Encode(cmd *Command) ([]byte, error) {
 	return json.Marshal(cmd)
 }
 
+//Decode the command using json protocol
 func (c *jsonCodec) Decode(b []byte) (cmd *Command, err error) {
 	cmd = new(Command)
 	err = json.Unmarshal(b, cmd)
@@ -132,41 +148,51 @@ func (c *jsonCodec) Decode(b []byte) (cmd *Command, err error) {
 type rocketMQCodec struct {
 }
 
+//Encode the command using rocketmq protocol
 func (c *rocketMQCodec) Encode(cmd *Command) ([]byte, error) {
 	return nil, nil
 }
 
+//Decode the bytes using rocketmq protocol
 func (c *rocketMQCodec) Decode(b []byte) (*Command, error) {
 	return nil, nil
 }
 
+//ProducerData represents the producer group
 type ProducerData struct {
 	groupName string
 }
 
+//ConsumerType represents the consumer type
 type ConsumerType struct {
 	typeCN string
 }
 
+//MessageModel represents message model
 type MessageModel struct {
 	modeCN string
 }
 
+//Consume offset type
 type ConsumeFromWhere string
 
+//Enum of consume offset
 const (
-	CONSUME_FROM_LAST_OFFSET  ConsumeFromWhere = "CONSUME_FROM_LAST_OFFSET"
-	CONSUME_FROM_FIRST_OFFSET ConsumeFromWhere = "CONSUME_FROM_FIRST_OFFSET"
-	CONSUME_FROM_TIMESTAMP    ConsumeFromWhere = "CONSUME_FROM_TIMESTAMP"
+	ConsumeFromLastOffset  ConsumeFromWhere = "CONSUME_FROM_LAST_OFFSET"
+	ConsumeFromFirstOffset ConsumeFromWhere = "CONSUME_FROM_FIRST_OFFSET"
+	ConsumeFromTimestamp   ConsumeFromWhere = "CONSUME_FROM_TIMESTAMP"
 )
 
+//Filter expression type
 type ExpressionType string
 
+//Enum of filter expression
 const (
 	SQL92 ExpressionType = "SQL92"
 	TAG   ExpressionType = "TAG"
 )
 
+//SubscriptionData represents the subscription config
 type SubscriptionData struct {
 	classFilterMode bool
 	topic           string
@@ -177,6 +203,7 @@ type SubscriptionData struct {
 	expressionType  ExpressionType
 }
 
+//ConsumerData represent the consumer config
 type ConsumerData struct {
 	groupName           string
 	consumeType         ConsumerType
@@ -186,29 +213,35 @@ type ConsumerData struct {
 	unitMode            bool
 }
 
+//HeartbeatData represents the data part of heartbeat req
 type HeartbeatData struct {
 	clientID        string
 	producerDataSet []ProducerData
 	consumerDataSet []ConsumerData
 }
 
+//Message queue permission type
 type Permission int
 
+//Enum of queue permission
 const (
-	PERM_PRIORITY Permission = 1 << 3
-	PERM_READ     Permission = 1 << 2
-	PERM_WRITE    Permission = 1 << 1
-	PERM_INHERIT  Permission = 1 << 0
+	PermPriority Permission = 1 << 3
+	PermRead     Permission = 1 << 2
+	PermWrite    Permission = 1 << 1
+	PermInherit  Permission = 1 << 0
 )
 
+//PermitRead tests if has PermitRead flag
 func PermitRead(perm Permission) bool {
-	return (perm & PERM_READ) == PERM_READ
+	return (perm & PermRead) == PermRead
 }
 
+//PermitWrite tests if has PermWrite flag
 func PermitWrite(perm Permission) bool {
-	return (perm & PERM_WRITE) == PERM_WRITE
+	return (perm & PermWrite) == PermWrite
 }
 
+//PermitInherit tests if has PermInherit flag
 func PermitInherit(perm Permission) bool {
-	return (perm & PERM_INHERIT) == PERM_INHERIT
+	return (perm & PermInherit) == PermInherit
 }

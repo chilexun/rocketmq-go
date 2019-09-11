@@ -71,22 +71,26 @@ func (r *SendMessageResponse) fromExtFields(fields map[string]string) (err error
 	return
 }
 
+func getRequestID() int32 {
+	return atomic.AddInt32(&requestID, 1)
+}
+
 //GetRouteInfo create a GetRouteInfoByTopic command
 func GetRouteInfo(topic string) Command {
 	header := make(map[string]string, 1)
 	header["topic"] = topic
-	return Command{Opaque: atomic.AddInt32(&requestID, 1), Code: int(GET_ROUTEINTO_BY_TOPIC), ExtFields: header}
+	return Command{Opaque: getRequestID(), Code: int(GetRouteInfoByTopicReq), ExtFields: header}
 }
 
 //SendMessage create a SendMessage command
 func SendMessage(request *SendMessageRequest) Command {
-	return Command{Opaque: atomic.AddInt32(&requestID, 1), Code: int(SEND_MESSAGE), Body: request.Body, ExtFields: request.toExtFields()}
+	return Command{Opaque: getRequestID(), Code: int(SendMessageReq), Body: request.Body, ExtFields: request.toExtFields()}
 }
 
 //HeartBeat create a HeartBeat command
 func HeartBeat(data HeartbeatData) Command {
 	body, _ := json.Marshal(data)
-	return Command{Opaque: atomic.AddInt32(&requestID, 1), Code: int(HEART_BEAT), Body: body}
+	return Command{Opaque: getRequestID(), Code: int(HeartBeatReq), Body: body}
 }
 
 //EncodeCommand encode the command with the specify serial type
