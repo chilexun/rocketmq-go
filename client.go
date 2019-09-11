@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,17 +13,29 @@ import (
 	"time"
 )
 
+//Client constants
+const (
+	ClientInnerProducerGroup  string = "CLIENT_INNER_PRODUCER_GROUP"
+	DefaultClientInstanceName string = "DEFAULT"
+)
+
+//ServiceState is a alias type of int32 and represent the running state of client
 type ServiceState = int32
 
 const (
+	//CreateJust is the initial state of client
 	CreateJust ServiceState = iota
+	//Running if client started success
 	Running
+	//ShutdownAlready after client is shutdown, it is a terminal state
 	ShutdownAlready
+	//StartFailed if try to start client failed, it is a terminal state
 	StartFailed
 )
 
 var clientMap sync.Map
 
+//A MQClient represent the a rocketmq client object related to Producer and Consumer
 type MQClient struct {
 	clientID      string
 	config        *ClientConfig
@@ -66,6 +77,7 @@ func GetClientInstance(config *ClientConfig, instanceName string) *MQClient {
 	return instance
 }
 
+//Start client jobs and set status to Running
 func (client *MQClient) Start() (err error) {
 	if !atomic.CompareAndSwapInt32(&client.status, CreateJust, StartFailed) {
 		if client.status != Running {
@@ -83,6 +95,7 @@ func (client *MQClient) Start() (err error) {
 	return
 }
 
+//Shutdown will stop the jobs and close connections if reference count gt 0
 func (client *MQClient) Shutdown() {
 	if atomic.LoadInt32(&client.refCount) > 0 {
 		return
@@ -93,10 +106,12 @@ func (client *MQClient) Shutdown() {
 	}
 }
 
+//IncrReference increase client reference count by 1
 func (client *MQClient) IncrReference() int32 {
 	return atomic.AddInt32(&client.refCount, 1)
 }
 
+//DecrReference decrease client reference count by 1
 func (client *MQClient) DecrReference() int32 {
 	return atomic.AddInt32(&client.refCount, -1)
 }
@@ -110,11 +125,12 @@ func (client *MQClient) SendMessageRequest(brokerAddr string, mq *MessageQueue,
 	if err != nil {
 		return nil, err
 	}
-	respValue := ResolveStruct(respCmd.ExtFields, reflect.TypeOf((*SendMessageResponse)(nil)).Elem())
-	response := respValue.Interface().(SendMessageResponse)
+
+	response := new(SendMessageResponse)
+	err = response.fromExtFields(respCmd.ExtFields)
 	response.Code = ResponseCode(respCmd.Code)
 	response.Remark = respCmd.Remark
-	return &response, nil
+	return response, err
 }
 
 func (client *MQClient) startScheduledTask() {
@@ -126,14 +142,15 @@ func (client *MQClient) startScheduledTask() {
 	client.executer.AddJob(1*time.Second, client.config.HeartbeatBrokerInterval, client.SendHeartbeatToBrokers)
 }
 
-func (this *MQClient) SendHeartbeatToBrokers() {
-	if atomic.CompareAndSwapInt32(&this.hbState, 0, 1) {
-		defer atomic.StoreInt32(&this.hbState, 0)
-		this.brokerMap.Range(func(k interface{}, v interface{}) bool {
+//SendHeartbeatToBrokers send heartbeat to all of master brokers
+func (client *MQClient) SendHeartbeatToBrokers() {
+	if atomic.CompareAndSwapInt32(&client.hbState, 0, 1) {
+		defer atomic.StoreInt32(&client.hbState, 0)
+		client.brokerMap.Range(func(k interface{}, v interface{}) bool {
 			brokers := v.(map[int]string)
 			for brokerID, brokerAddr := range brokers {
 				if brokerID == 1 {
-					this.sendHeartbeatToBroker(brokerAddr)
+					client.sendHeartbeatToBroker(k.(string), brokerAddr)
 				}
 			}
 			return true
@@ -141,8 +158,8 @@ func (this *MQClient) SendHeartbeatToBrokers() {
 	}
 }
 
-func (this *MQClient) sendHeartbeatToBroker(brokerAddr string) {
-	heartbeat := HeartbeatData{clientID: this.clientID}
+func (client *MQClient) sendHeartbeatToBroker(brokerName string, brokerAddr string) {
+	heartbeat := HeartbeatData{clientID: client.clientID}
 	groups := GetAllProducerGroups()
 	if len(groups) <= 0 {
 		return
@@ -152,21 +169,21 @@ func (this *MQClient) sendHeartbeatToBroker(brokerAddr string) {
 		heartbeat.producerDataSet[i] = ProducerData{group}
 	}
 	cmd := HeartBeat(heartbeat)
-	resp, err := this.rpcClient.InvokeSync(brokerAddr, &cmd, 3*time.Second)
+	resp, err := client.rpcClient.InvokeSync(brokerAddr, &cmd, 3*time.Second)
 	if err != nil {
-		//log error
+		logger.Errorf("Send heartbeat to broker %s(%s), Error:%s", brokerName, brokerAddr, err)
 		return
 	} else if ResponseCode(resp.Code) != SUCCESS {
-		//log code and err msg
+		logger.Errorf("Receive invalid heartbeat response from broker %s(%s), Error Code:%d", brokerName, brokerAddr, resp.Code)
 		return
 	}
 	version := resp.Version
-	if verMap, ok := this.brokerVerMap.Load(brokerAddr); ok {
+	if verMap, ok := client.brokerVerMap.Load(brokerName); ok {
 		verMap.(map[string]int)[brokerAddr] = version
 	} else {
 		newMap := make(map[string]int, 4)
 		newMap[brokerAddr] = version
-		this.brokerVerMap.Store(brokerAddr, verMap)
+		client.brokerVerMap.Store(brokerName, verMap)
 	}
 }
 
@@ -197,6 +214,7 @@ func (client *MQClient) fetchNameServAddr() {
 	}
 }
 
+//SyncTopicFromNameserv fetch topic routes from nameserv and cache
 func (client *MQClient) SyncTopicFromNameserv() {
 	client.topicLock.Lock()
 	defer client.topicLock.Unlock()
@@ -207,6 +225,7 @@ func (client *MQClient) SyncTopicFromNameserv() {
 	})
 }
 
+//GetTopicPublishInfo load topic route from cache  and try to fetch from nameserv if no cache
 func (client *MQClient) GetTopicPublishInfo(topic string) *TopicPublishInfo {
 	publishInfo := client.topicManager.GetTopicPublishInfo(topic)
 	if publishInfo != nil {

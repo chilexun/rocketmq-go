@@ -9,8 +9,9 @@ import (
 	"sync/atomic"
 )
 
-var requestId int32
+var requestID int32
 
+//Command represents a rpc cmd between servers
 type Command struct {
 	Code      int               `json:"code"`
 	Opaque    int32             `json:"opaque"`
@@ -20,10 +21,11 @@ type Command struct {
 	ExtFields map[string]string `json:"extFields,omitempty"`
 }
 
+//SendMessageRequest represents a message send rpc request
 type SendMessageRequest struct {
 	ProducerGroup     string
 	Topic             string
-	QueueId           int
+	QueueID           int
 	SysFlag           MsgSysFlag
 	BornTimestamp     int64
 	Flag              int
@@ -39,7 +41,7 @@ func (r *SendMessageRequest) toExtFields() map[string]string {
 	fields := make(map[string]string, 11)
 	fields["producerGroup"] = r.ProducerGroup
 	fields["topic"] = r.Topic
-	fields["queueId"] = strconv.Itoa(r.QueueId)
+	fields["queueId"] = strconv.Itoa(r.QueueID)
 	fields["sysFlag"] = strconv.Itoa(int(r.SysFlag))
 	fields["bornTimestamp"] = strconv.FormatInt(r.BornTimestamp, 64)
 	fields["flag"] = strconv.Itoa(r.Flag)
@@ -51,32 +53,45 @@ func (r *SendMessageRequest) toExtFields() map[string]string {
 	return fields
 }
 
+//SendMessageResponse wraps a message send command response
 type SendMessageResponse struct {
 	Code          ResponseCode
-	MsgId         string
-	QueueId       int
+	MsgID         string
+	QueueID       int
 	QueueOffset   int64
-	TransactionId string
+	TransactionID string
 	Remark        string
 }
 
+func (r *SendMessageResponse) fromExtFields(fields map[string]string) (err error) {
+	r.MsgID = fields["msgId"]
+	r.QueueID, err = strconv.Atoi(fields["queueId"])
+	r.QueueOffset, err = strconv.ParseInt(fields["queueOffset"], 10, 64)
+	r.TransactionID = fields["transactionId"]
+	return
+}
+
+//GetRouteInfo create a GetRouteInfoByTopic command
 func GetRouteInfo(topic string) Command {
 	header := make(map[string]string, 1)
 	header["topic"] = topic
-	return Command{Opaque: atomic.AddInt32(&requestId, 1), Code: int(GET_ROUTEINTO_BY_TOPIC), ExtFields: header}
+	return Command{Opaque: atomic.AddInt32(&requestID, 1), Code: int(GET_ROUTEINTO_BY_TOPIC), ExtFields: header}
 }
 
+//SendMessage create a SendMessage command
 func SendMessage(request *SendMessageRequest) Command {
-	return Command{Opaque: atomic.AddInt32(&requestId, 1), Code: int(SEND_MESSAGE), Body: request.Body, ExtFields: request.toExtFields()}
+	return Command{Opaque: atomic.AddInt32(&requestID, 1), Code: int(SEND_MESSAGE), Body: request.Body, ExtFields: request.toExtFields()}
 }
 
+//HeartBeat create a HeartBeat command
 func HeartBeat(data HeartbeatData) Command {
 	body, _ := json.Marshal(data)
-	return Command{Opaque: atomic.AddInt32(&requestId, 1), Code: int(HEART_BEAT), Body: body}
+	return Command{Opaque: atomic.AddInt32(&requestID, 1), Code: int(HEART_BEAT), Body: body}
 }
 
+//EncodeCommand encode the command with the specify serial type
 func EncodeCommand(c *Command, serialType SerializeType) ([]byte, error) {
-	var length int = 4
+	var length = 4
 	headerData, err := CmdHeaderCodecs[serialType].Encode(c)
 	if err != nil {
 		return nil, err
@@ -96,6 +111,7 @@ func EncodeCommand(c *Command, serialType SerializeType) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
+//DecodeCommand decode the byte array from server
 func DecodeCommand(data []byte) (cmd *Command, err error) {
 	buffer := bytes.NewBuffer(data)
 	var length int32
@@ -143,9 +159,9 @@ func msgProps2String(props map[string]string) string {
 	var builder strings.Builder
 	for k, v := range props {
 		builder.WriteString(k)
-		builder.WriteByte(NameValueSeparator)
+		builder.WriteByte(MessageNameValueSeparator)
 		builder.WriteString(v)
-		builder.WriteByte(PropertySeparator)
+		builder.WriteByte(MessagePropertySeparator)
 	}
 	return builder.String()
 }

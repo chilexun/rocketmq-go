@@ -6,9 +6,11 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 )
 
+//Coerce convert arg to expect type value
 func Coerce(v interface{}, typ reflect.Type) (reflect.Value, error) {
 	var err error
 	if typ.Kind() == reflect.Ptr {
@@ -55,6 +57,7 @@ func valueTypeCoerce(v interface{}, typ reflect.Type) reflect.Value {
 	return tval
 }
 
+//CoerceString convert arg to string
 func CoerceString(v interface{}) string {
 	switch v := v.(type) {
 	case string:
@@ -67,6 +70,7 @@ func CoerceString(v interface{}) string {
 	return fmt.Sprintf("%s", v)
 }
 
+//CoerceDuration convert arg to time.Duration
 func CoerceDuration(v interface{}) (time.Duration, error) {
 	switch v := v.(type) {
 	case string:
@@ -83,6 +87,7 @@ func CoerceDuration(v interface{}) (time.Duration, error) {
 	return 0, errors.New("invalid value type")
 }
 
+//CoerceAddr convert arg to net.Addr
 func CoerceAddr(v interface{}) (net.Addr, error) {
 	switch v := v.(type) {
 	case string:
@@ -93,6 +98,7 @@ func CoerceAddr(v interface{}) (net.Addr, error) {
 	return nil, errors.New("invalid value type")
 }
 
+//CoerceBool convert arg to bool
 func CoerceBool(v interface{}) (bool, error) {
 	switch v := v.(type) {
 	case bool:
@@ -107,6 +113,7 @@ func CoerceBool(v interface{}) (bool, error) {
 	return false, errors.New("invalid value type")
 }
 
+//CoerceFloat64 convert arg to float64
 func CoerceFloat64(v interface{}) (float64, error) {
 	switch v := v.(type) {
 	case string:
@@ -123,6 +130,7 @@ func CoerceFloat64(v interface{}) (float64, error) {
 	return 0, errors.New("invalid value type")
 }
 
+//CoerceInt64 convert arg to int64
 func CoerceInt64(v interface{}) (int64, error) {
 	switch v := v.(type) {
 	case string:
@@ -135,6 +143,7 @@ func CoerceInt64(v interface{}) (int64, error) {
 	return 0, errors.New("invalid value type")
 }
 
+//CoerceUint64 convert arg to uint64
 func CoerceUint64(v interface{}) (uint64, error) {
 	switch v := v.(type) {
 	case string:
@@ -181,10 +190,12 @@ func ValueCompare(v1 reflect.Value, v2 reflect.Value) (result int, err error) {
 	return
 }
 
+//ResolveStruct initial new object and copy properties from map
 func ResolveStruct(fields map[string]string, t reflect.Type) reflect.Value {
 	header := reflect.New(t).Elem()
 	for k, v := range fields {
-		if f := header.FieldByName(k); f.CanSet() {
+		name := strings.ToUpper(k[:1]) + k[1:]
+		if f := header.FieldByName(name); f.CanSet() {
 			setFieldValue(f, v)
 		}
 	}

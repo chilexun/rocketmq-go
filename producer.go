@@ -11,31 +11,29 @@ import (
 	"time"
 )
 
-const (
-	CLIENT_INNER_PRODUCER_GROUP string = "CLIENT_INNER_PRODUCER_GROUP"
-	DEFAULT_INSTANCE_NAME       string = "DEFAULT"
-)
-
 var producerTable sync.Map
 
+//SendStatus is the enum type of send message result
 type SendStatus int
 
+//Send status definition
 const (
-	SEND_OK SendStatus = iota
-	SEND_FAIL
-	BROKER_FLUSH_DISK_TIMEOUT
-	BROKER_FLUSH_SLAVE_TIMEOUT
-	BROKER_SLAVE_NOT_AVAILABLE
+	SendOK SendStatus = iota
+	SendFail
+	BrokerFlushDiskTimeout
+	BrokerFlushSlaveTimeout
+	BrokerSlaveNotAvailable
 )
 
+//SendResult represents the result of send message
 type SendResult struct {
 	SendStatus    SendStatus
-	MsgId         string
+	MsgID         string
 	MsgQueue      MessageQueue
 	QueueOffset   int64
-	TransactionId string
-	OffsetMsgId   string
-	RegionId      string
+	TransactionID string
+	OffsetMsgID   string
+	RegionID      string
 }
 
 //Producer is a rocketmq producer client interface
@@ -72,7 +70,7 @@ func NewProducer(producerGroup string, config *ProducerConfig) (Producer, error)
 	}
 	instanceName := config.InstanceName
 	if instanceName == "" {
-		instanceName = DEFAULT_INSTANCE_NAME
+		instanceName = DefaultClientInstanceName
 	}
 	p := &defaultProducer{
 		producerGroup:    producerGroup,
@@ -88,7 +86,7 @@ func (p *defaultProducer) Start() error {
 	if !atomic.CompareAndSwapInt32(&p.status, CreateJust, StartFailed) {
 		return errors.New("The producer service state not OK, maybe started once")
 	}
-	if p.producerGroup != CLIENT_INNER_PRODUCER_GROUP && p.instanceName == DEFAULT_INSTANCE_NAME {
+	if p.producerGroup != ClientInnerProducerGroup && p.instanceName == DefaultClientInstanceName {
 		p.instanceName = strconv.Itoa(os.Getpid())
 	}
 	if !registerProducer(p.producerGroup, p) {
@@ -119,11 +117,11 @@ func (p *defaultProducer) Shutdown() {
 }
 
 func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, error) {
-	failResult := SendResult{SendStatus: SEND_FAIL}
-	if p.status != Running {
+	failResult := SendResult{SendStatus: SendFail}
+	if atomic.LoadInt32(&p.status) != Running {
 		return failResult, errors.New("The producer service state not OK")
 	}
-	if err := msg.Validate(); err != nil {
+	if err := ValidateMsg(&msg); err != nil {
 		return failResult, err
 	}
 	beginTime := time.Now()
@@ -142,7 +140,7 @@ func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 		sendResult, err = p.sendKernelImpl(&msg, &mq, topicPublishInfo, timeout)
 		if err == nil {
 			p.mqSelectStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), false})
-			if sendResult.SendStatus != SEND_OK {
+			if sendResult.SendStatus != SendOK {
 				if p.config.RetryAnotherBrokerWhenNotStoreOK {
 					continue
 				}
@@ -197,13 +195,13 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 			logger.Warn("Compress message body error:" + err.Error())
 		}
 	}
-	if msg.Properties[PROPERTY_TRANSACTION_PREPARED] == "true" {
+	if msg.Properties[MessageTransactionPrepared] == "true" {
 		sysFlag |= TRANSACTION_PREPARED_TYPE
 	}
 	request := &SendMessageRequest{
 		ProducerGroup:  p.producerGroup,
 		Topic:          mq.Topic,
-		QueueId:        mq.QueueId,
+		QueueID:        mq.QueueId,
 		SysFlag:        sysFlag,
 		BornTimestamp:  time.Now().UnixNano() / 1e6,
 		Flag:           msg.Flag,
@@ -221,36 +219,36 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicIn
 		return nil, err
 	}
 
-	sendResult := &SendResult{}
+	sendResult := new(SendResult)
 	switch code := response.Code; code {
 	case SUCCESS:
-		sendResult.SendStatus = SEND_OK
+		sendResult.SendStatus = SendOK
 	case FLUSH_DISK_TIMEOUT:
-		sendResult.SendStatus = BROKER_FLUSH_DISK_TIMEOUT
+		sendResult.SendStatus = BrokerFlushDiskTimeout
 	case FLUSH_SLAVE_TIMEOUT:
-		sendResult.SendStatus = BROKER_FLUSH_SLAVE_TIMEOUT
+		sendResult.SendStatus = BrokerFlushSlaveTimeout
 	case SLAVE_NOT_AVAILABLE:
-		sendResult.SendStatus = BROKER_SLAVE_NOT_AVAILABLE
+		sendResult.SendStatus = BrokerSlaveNotAvailable
 	default:
 		return nil, MQBrokerError{code, response.Remark}
 	}
 
-	sendResult.MsgId = msg.GetUniqID()
-	sendResult.OffsetMsgId = response.MsgId
-	sendResult.MsgQueue = MessageQueue{mq.Topic, mq.BrokerName, response.QueueId}
+	sendResult.MsgID = msg.GetUniqID()
+	sendResult.OffsetMsgID = response.MsgID
+	sendResult.MsgQueue = MessageQueue{mq.Topic, mq.BrokerName, response.QueueID}
 	sendResult.QueueOffset = response.QueueOffset
-	sendResult.TransactionId = response.TransactionId
+	sendResult.TransactionID = response.TransactionID
 	return sendResult, nil
 }
 
 func setRetryHeader(header *SendMessageRequest, msgProps map[string]string) {
-	if reconsumeTimes := msgProps[PROPERTY_RECONSUME_TIME]; reconsumeTimes != "" {
+	if reconsumeTimes := msgProps[MessageReconsumeTime]; reconsumeTimes != "" {
 		header.ReconsumeTimes, _ = strconv.Atoi(reconsumeTimes)
-		delete(msgProps, PROPERTY_RECONSUME_TIME)
+		delete(msgProps, MessageReconsumeTime)
 	}
-	if maxReTimes := msgProps[PROPERTY_MAX_RECONSUME_TIMES]; maxReTimes != "" {
+	if maxReTimes := msgProps[MessageMaxReconsumeTimes]; maxReTimes != "" {
 		header.MaxReconsumeTimes, _ = strconv.Atoi(maxReTimes)
-		delete(msgProps, PROPERTY_MAX_RECONSUME_TIMES)
+		delete(msgProps, MessageMaxReconsumeTimes)
 	}
 }
 
@@ -265,6 +263,7 @@ func unregisterProducer(producerGroup string) {
 	producerTable.Delete(producerGroup)
 }
 
+//GetAllProducerGroups returns the snapshot of all register producer group
 func GetAllProducerGroups() []string {
 	groups := make([]string, 0)
 	producerTable.Range(func(k interface{}, v interface{}) bool {
