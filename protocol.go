@@ -2,7 +2,7 @@ package mqclient
 
 import "encoding/json"
 
-//Request code type
+//RequestCode specifies the code of request
 type RequestCode int
 
 //Enum of request code
@@ -47,7 +47,7 @@ const (
 	GetBrokerClusterInfoReq
 )
 
-//Response code type
+//ResponseCode specifies the code of response
 type ResponseCode int
 
 //Enum of Response code
@@ -96,7 +96,7 @@ const (
 	NoMessage
 )
 
-//Message flag type
+//MsgSysFlag specifies the sysflag of message
 type MsgSysFlag int
 
 //Enum of message flag
@@ -109,7 +109,7 @@ const (
 	TransactionRollbackType MsgSysFlag = 0x3 << 2
 )
 
-//Command serialize type
+//SerializeType specifies the serial type of command
 type SerializeType byte
 
 //Enum of command serialize type
@@ -118,7 +118,7 @@ const (
 	SerialTypeRocketMQ SerializeType = 1
 )
 
-//Supported CmdHeaderCodec implements
+//CmdHeaderCodecs contains implements
 var CmdHeaderCodecs = map[SerializeType]CmdHeaderCodec{
 	SerialTypeJson:     new(jsonCodec),
 	SerialTypeRocketMQ: new(rocketMQCodec),
@@ -173,7 +173,7 @@ type MessageModel struct {
 	modeCN string
 }
 
-//Consume offset type
+//ConsumeFromWhere specifies the offset type
 type ConsumeFromWhere string
 
 //Enum of consume offset
@@ -183,7 +183,7 @@ const (
 	ConsumeFromTimestamp   ConsumeFromWhere = "CONSUME_FROM_TIMESTAMP"
 )
 
-//Filter expression type
+//ExpressionType is filter expression type
 type ExpressionType string
 
 //Enum of filter expression
@@ -220,7 +220,7 @@ type HeartbeatData struct {
 	consumerDataSet []ConsumerData
 }
 
-//Message queue permission type
+//Permission is the type of queue permission
 type Permission int
 
 //Enum of queue permission

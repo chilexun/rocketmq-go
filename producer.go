@@ -13,10 +13,10 @@ import (
 
 var producerTable sync.Map
 
-//SendStatus is the enum type of send message result
+//SendStatus specifies the request result of send message
 type SendStatus int
 
-//Send status definition
+//Send status values
 const (
 	SendOK SendStatus = iota
 	SendFail
@@ -137,7 +137,7 @@ func (p *defaultProducer) Send(msg Message, timeout time.Duration) (SendResult, 
 	for times := 0; times <= maxRetry; times++ {
 		var lastBrokerName = mq.BrokerName
 		mq = p.mqSelectStrategy.SelectOneMessageQueue(topicPublishInfo, lastBrokerName)
-		sendResult, err = p.sendKernelImpl(&msg, &mq, topicPublishInfo, timeout)
+		sendResult, err = p.sendKernelImpl(&msg, &mq, timeout)
 		if err == nil {
 			p.mqSelectStrategy.UpdateSendStats(SendStats{mq.BrokerName, time.Since(beginTime), false})
 			if sendResult.SendStatus != SendOK {
@@ -175,10 +175,10 @@ func (p *defaultProducer) SendAsync(msg Message, callback SendCallback, timeout 
 	return nil
 }
 
-func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, topicInfo *TopicPublishInfo, timeout time.Duration) (*SendResult, error) {
-	brokerAddr := GetBrokerAddrByName(mq.BrokerName, p.config.SendMessageWithVIPChannel)
+func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, timeout time.Duration) (*SendResult, error) {
+	brokerAddr := p.mqClient.GetBrokerAddrByName(mq.Topic, mq.BrokerName, p.config.SendMessageWithVIPChannel)
 	if brokerAddr == "" {
-		return nil, errors.New(fmt.Sprint("The broker [s%] not exist", mq.BrokerName))
+		return nil, fmt.Errorf("The broker [%s] not exist", mq.BrokerName)
 	}
 
 	if msg.GetUniqID() == "" {

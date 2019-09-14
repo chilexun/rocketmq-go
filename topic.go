@@ -8,6 +8,12 @@ import (
 	"sync/atomic"
 )
 
+//MasterBrokerID is the ID of master in cluster
+const (
+	MasterBrokerID int = 1
+)
+
+//QueueData represents the broker queue info
 type QueueData struct {
 	BrokerName     string
 	ReadQueueNums  int
@@ -16,12 +22,14 @@ type QueueData struct {
 	TopicSynFlag   int
 }
 
+//BrokerData represents the broker cluster info
 type BrokerData struct {
 	cluster     string
 	brokerName  string
 	brokerAddrs map[int]string
 }
 
+//TopicRouteData represents the route data
 type TopicRouteData struct {
 	OrderTopicConf    string
 	queueDatas        []QueueData
@@ -29,6 +37,7 @@ type TopicRouteData struct {
 	filterServerTable map[string][]string
 }
 
+//TopicPublishInfo represent the publish route
 type TopicPublishInfo struct {
 	OrderTopic     bool
 	HasRouteInfo   bool
@@ -37,6 +46,7 @@ type TopicPublishInfo struct {
 	nextQueueIndex int32
 }
 
+//TopicRouteInfoManager represent and cache the cluster route info
 type TopicRouteInfoManager struct {
 	topicRouteTable  sync.Map
 	brokerAddrTable  sync.Map
@@ -44,6 +54,7 @@ type TopicRouteInfoManager struct {
 	subscribeTable   sync.Map
 }
 
+//SetTopicRouteData update topic route info in the cache
 func (m *TopicRouteInfoManager) SetTopicRouteData(topic string, data *TopicRouteData) {
 	for _, brokerData := range data.brokerDatas {
 		m.brokerAddrTable.Store(brokerData.brokerName, brokerData.brokerAddrs)
@@ -119,6 +130,7 @@ func cloneRouteData(data *TopicRouteData) *TopicRouteData {
 	return cloneRouteData
 }
 
+//GetTopicPublishInfo returns the publish info of the topic
 func (m *TopicRouteInfoManager) GetTopicPublishInfo(topic string) *TopicPublishInfo {
 	if v, ok := m.publishInfoTable.Load(topic); ok {
 		return v.(*TopicPublishInfo)
@@ -126,10 +138,12 @@ func (m *TopicRouteInfoManager) GetTopicPublishInfo(topic string) *TopicPublishI
 	return nil
 }
 
+//GetQueueNumber returns the number of queues in the topic
 func (t *TopicPublishInfo) GetQueueNumber() int {
 	return len(t.MsgQueues)
 }
 
+//GetWriteQueueNumber returns the num of write queues
 func (t *TopicPublishInfo) GetWriteQueueNumber(brokerName string) int {
 	for _, queueData := range t.topicRoute.queueDatas {
 		if queueData.BrokerName == brokerName {
@@ -139,6 +153,7 @@ func (t *TopicPublishInfo) GetWriteQueueNumber(brokerName string) int {
 	return -1
 }
 
+//GetNextQueue select a next queue id
 func (t *TopicPublishInfo) GetNextQueue() MessageQueue {
 	nextIndex := atomic.AddInt32(&t.nextQueueIndex, 1)
 	pos := int(nextIndex) % len(t.MsgQueues)
@@ -148,10 +163,24 @@ func (t *TopicPublishInfo) GetNextQueue() MessageQueue {
 	return t.MsgQueues[pos]
 }
 
-func GetTopicSubscribeInfo() {
+//GetTopicSubscribeInfo returns consumer topic subscription info
+func (m *TopicRouteInfoManager) GetTopicSubscribeInfo() {
 
 }
 
-func GetBrokerAddrByName(brokerName string, vipPrefer bool) string {
+//GetBrokerAddrByName return broker address by broker name
+func (m *TopicRouteInfoManager) GetBrokerAddrByName(brokerName string, vipPrefer bool) string {
+	clusterTable, ok := m.brokerAddrTable.Load(brokerName)
+	if ok {
+		addr, ok := clusterTable.(map[int]string)[MasterBrokerID]
+		if ok {
+			if vipPrefer {
+				ipAndPort := strings.Split(addr, ":")
+				port, _ := strconv.Atoi(ipAndPort[1])
+				return ipAndPort[0] + ":" + strconv.Itoa(port-2)
+			}
+			return addr
+		}
+	}
 	return ""
 }
