@@ -34,8 +34,9 @@ func Coerce(v interface{}, typ reflect.Type) (reflect.Value, error) {
 	default:
 		v = nil
 		err = fmt.Errorf("invalid type %s", typ.String())
+		return reflect.ValueOf(v), err
 	}
-	return valueTypeCoerce(v, typ), err
+	return valueTypeCoerce(v, typ), nil
 }
 
 func valueTypeCoerce(v interface{}, typ reflect.Type) reflect.Value {

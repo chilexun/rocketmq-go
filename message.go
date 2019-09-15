@@ -65,10 +65,7 @@ var validTopic = regexp.MustCompile(`^[%|a-zA-Z0-9_-]{1, 255}$`)
 
 func init() {
 	buf := bytes.NewBuffer(make([]byte, 4+2+4))
-	ipv4, _ := GetIPv4(GetIPAddr())
-	for _, b := range ipv4 {
-		buf.WriteByte(b)
-	}
+	buf.Write(GetIPAddr())
 	binary.Write(buf, binary.BigEndian, int16(os.Getpid()))
 	binary.Write(buf, binary.BigEndian, rand.Int31())
 	fixMsgIDPrefix = buf.String()

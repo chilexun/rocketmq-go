@@ -3,6 +3,7 @@ package mqclient
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -56,7 +57,7 @@ type MQClient struct {
 
 //GetClientInstance create a new client if instanceName had not been used
 func GetClientInstance(config *ClientConfig, instanceName string) *MQClient {
-	clientID := GetIPAddr() + "@" + instanceName
+	clientID := fmt.Sprint(GetIPAddr()) + "@" + instanceName
 	value, ok := clientMap.Load(clientID)
 	if ok {
 		return value.(*MQClient)
@@ -240,6 +241,18 @@ func (client *MQClient) GetTopicPublishInfo(topic string) *TopicPublishInfo {
 	}
 	client.syncTopicFromNameserv(topic)
 	return client.topicManager.GetTopicPublishInfo(topic)
+}
+
+//GetBrokerAddrByName returns the master broker addr. Will try to sync topic route if no addr was found
+func (client *MQClient) GetBrokerAddrByName(topic string, brokerName string, vipPrefer bool) string {
+	addr := client.topicManager.GetBrokerAddrByName(brokerName, vipPrefer)
+	if addr == "" {
+		client.topicLock.Lock()
+		defer client.topicLock.Unlock()
+		client.syncTopicFromNameserv(topic)
+		addr = client.topicManager.GetBrokerAddrByName(brokerName, vipPrefer)
+	}
+	return addr
 }
 
 func (client *MQClient) syncTopicFromNameserv(topic string) {

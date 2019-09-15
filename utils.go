@@ -2,56 +2,37 @@ package mqclient
 
 import (
 	"bytes"
-	"compress/flate"
+	"compress/zlib"
 	"net"
 	"runtime"
-	"strconv"
-	"strings"
-	"sync"
 	"sync/atomic"
 )
 
-func GetIPAddr() string {
+//GetIPAddr returns ipv4 addrs and external addr is prefered
+func GetIPAddr() net.IP {
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
-		var internelIp string
+		var internelIp net.IP
 		for _, addr := range addrs {
-			ip := addr.String()
-			if idx := strings.IndexByte(ip, ':'); idx > 0 {
-				ip = ip[:idx]
-			}
-			if b, v4 := GetIPv4(ip); v4 && IsValidIp(b) {
-				if !IsInternalAddr(b) {
-					return ip
-				} else {
-					internelIp = ip
+			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				ipv4 := ipnet.IP.To4()
+				if ipv4 != nil && isValidIp(ipv4) {
+					if !isInternalAddr(ipv4) {
+						return ipv4
+					} else {
+						internelIp = ipv4
+					}
 				}
 			}
 		}
-		if len(internelIp) > 0 {
+		if internelIp != nil {
 			return internelIp
 		}
 	}
 	panic(err)
 }
 
-func GetIPv4(ipStr string) ([]byte, bool) {
-	splited := strings.Split(ipStr, ".")
-	if len(splited) != 4 {
-		return nil, false
-	}
-	ip := make([]byte, 4)
-	for i, str := range splited {
-		b, err := strconv.Atoi(str)
-		if err != nil {
-			return nil, false
-		}
-		ip[i] = byte(b)
-	}
-	return ip, true
-}
-
-func IsValidIp(ip []byte) bool {
+func isValidIp(ip []byte) bool {
 	if ip[0] >= 1 && ip[0] <= 126 {
 		if ip[1] == 1 && ip[2] == 1 && ip[3] == 1 {
 			return false
@@ -80,7 +61,7 @@ func IsValidIp(ip []byte) bool {
 	return false
 }
 
-func IsInternalAddr(ip []byte) bool {
+func isInternalAddr(ip []byte) bool {
 	if ip[0] == 10 {
 		return true
 	} else if ip[0] == 172 {
@@ -95,9 +76,10 @@ func IsInternalAddr(ip []byte) bool {
 	return false
 }
 
+//Compress the body with specified level
 func Compress(body []byte, compressLevel int) ([]byte, error) {
 	buf := new(bytes.Buffer)
-	w, err := flate.NewWriter(buf, compressLevel)
+	w, err := zlib.NewWriterLevel(buf, compressLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -109,20 +91,22 @@ func Compress(body []byte, compressLevel int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-type spinLock uint32
+//SpinLock is a spin Locker implements
+type SpinLock uint32
 
-func (sl *spinLock) Lock() {
+//Lock blocked util obtain
+func (sl *SpinLock) Lock() {
 	for !atomic.CompareAndSwapUint32((*uint32)(sl), 0, 1) {
 		runtime.Gosched() //without this it locks up on GOMAXPROCS > 1
 	}
 }
-func (sl *spinLock) Unlock() {
+
+//Unlock release the lock
+func (sl *SpinLock) Unlock() {
 	atomic.StoreUint32((*uint32)(sl), 0)
 }
-func (sl *spinLock) TryLock() bool {
+
+//TryLock return true if lock obtain success
+func (sl *SpinLock) TryLock() bool {
 	return atomic.CompareAndSwapUint32((*uint32)(sl), 0, 1)
-}
-func SpinLock() sync.Locker {
-	var lock spinLock
-	return &lock
 }

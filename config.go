@@ -21,9 +21,9 @@ type ClientConfig struct {
 	WriteTimeout            time.Duration `min:"100ms" max:"5m" default:"1s"`
 	LocalAddr               net.Addr
 	TLSConfig               *tls.Config
-	SendChanSize            int  `default:"100"`
-	RcvChanSize             int  `default:"100"`
-	SerializeType           byte `min:"0" max:"1"`
+	SendChanSize            int `default:"100"`
+	RcvChanSize             int `default:"100"`
+	SerializeType           SerializeType
 	initialized             bool
 }
 
@@ -34,7 +34,7 @@ type ProducerConfig struct {
 	RetryAnotherBrokerWhenNotStoreOK bool
 	SendMessageWithVIPChannel        bool `default:"true"`
 	CompressMsgBodyOverHowmuch       int  `min:"512" default:"4094"`
-	ZipCompressLevel                 int  `min:"0" default:"1"`
+	ZipCompressLevel                 int  `min:"0" default:"5"`
 }
 
 //ConsumerConfig of rocketmq options
@@ -85,7 +85,10 @@ func (c *ProducerConfig) Validate() error {
 	}
 	err := validate(c)
 	if err == nil {
-		err = validate(c.ClientConfig)
+		if c.ClientConfig.SerializeType != SerialTypeJson && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
+			return errors.New("Invalid SerializeType value")
+		}
+		err = validate(&c.ClientConfig)
 	}
 	return err
 }
@@ -97,7 +100,10 @@ func (c *ConsumerConfig) Validate() error {
 	}
 	err := validate(c)
 	if err == nil {
-		err = validate(c.ClientConfig)
+		if c.ClientConfig.SerializeType != SerialTypeJson && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
+			return errors.New("Invalid SerializeType value")
+		}
+		err = validate(&c.ClientConfig)
 	}
 	return err
 }
@@ -112,7 +118,7 @@ func validate(c interface{}) error {
 		fieldVal := val.Field(i)
 
 		if min != "" {
-			minVal, _ := Coerce(fieldVal, field.Type)
+			minVal, _ := Coerce(min, field.Type)
 			result, err := ValueCompare(fieldVal, minVal)
 			if err != nil {
 				return err
@@ -121,7 +127,7 @@ func validate(c interface{}) error {
 			}
 		}
 		if max != "" {
-			maxVal, _ := Coerce(fieldVal, field.Type)
+			maxVal, _ := Coerce(max, field.Type)
 			result, err := ValueCompare(fieldVal, maxVal)
 			if err != nil {
 				return err

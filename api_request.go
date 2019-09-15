@@ -14,7 +14,6 @@ type RPCClient interface {
 	CloseAllConns()
 }
 
-//todo : remove conn from connMap if conn closed
 type defaultRPCClient struct {
 	config   *ClientConfig
 	reqCache sync.Map
