@@ -122,11 +122,13 @@ func (c *Conn) WriteCommand(ctx context.Context, cmd *Command) (err error) {
 			err = errors.New("Connect had been closed")
 		}
 	}()
-	select {
-	case c.cmdChan <- commandHolder{cmd, ctx}:
-		return nil
-	case <-ctx.Done():
-		return errors.New("Request send buffer's full")
+	for {
+		select {
+		case c.cmdChan <- commandHolder{cmd, ctx}:
+			return nil
+		case <-ctx.Done():
+			return errors.New("Request send buffer's full")
+		}
 	}
 }
 
@@ -184,7 +186,7 @@ func (c *Conn) writeLoop() {
 
 		data, err := EncodeCommand(cmdHolder.cmd, SerializeType(c.config.SerializeType))
 		if err == nil {
-			buf := bytes.NewBuffer(make([]byte, len(data)+4))
+			buf := new(bytes.Buffer)
 			binary.Write(buf, binary.BigEndian, int32(len(data)))
 			buf.Write(data)
 

@@ -43,7 +43,7 @@ func (r *SendMessageRequest) toExtFields() map[string]string {
 	fields["topic"] = r.Topic
 	fields["queueId"] = strconv.Itoa(r.QueueID)
 	fields["sysFlag"] = strconv.Itoa(int(r.SysFlag))
-	fields["bornTimestamp"] = strconv.FormatInt(r.BornTimestamp, 64)
+	fields["bornTimestamp"] = strconv.FormatInt(r.BornTimestamp, 10)
 	fields["flag"] = strconv.Itoa(r.Flag)
 	fields["properties"] = msgProps2String(r.Properties)
 	fields["reconsumeTimes"] = strconv.Itoa(r.ReconsumeTimes)
