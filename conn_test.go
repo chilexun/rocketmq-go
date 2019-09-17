@@ -1,9 +1,11 @@
 package mqclient
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"sync"
 	"testing"
@@ -27,15 +29,15 @@ func (*mockListener) OnMessage(cmd *Command) {
 }
 
 func (*mockListener) OnError(opaque int32, err error) {
-	fmt.Printf("Request process Error, opaque:%d, %s", opaque, err)
+	fmt.Printf("Request process Error, opaque:%d, %s\n", opaque, err)
 }
 
 func (*mockListener) OnIOError(c *Conn, err error) {
-	fmt.Printf("IO Error, conn: %s", c.GetAddr())
+	fmt.Printf("IO Error, conn: %s\n", c.GetAddr())
 }
 
 func (*mockListener) OnClosed(c *Conn) {
-	fmt.Printf("Connection closed: %s", c.GetAddr())
+	fmt.Printf("Connection closed: %s\n", c.GetAddr())
 }
 
 func init() {
@@ -65,25 +67,28 @@ func startTCPServer() {
 		return
 	}
 	defer server.Close()
-	for {
-		conn, err := server.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		fmt.Printf("%s connected", conn.RemoteAddr().String())
 
-		buf, err := ioutil.ReadAll(conn)
-		if err != nil {
-			fmt.Printf("Fail to start server:%s", err)
-			return
-		}
-		fmt.Printf("Message received:%d \n", len(buf))
-
-		respBuf, err := EncodeCommand(&response, SerialTypeJson)
-		conn.Write(respBuf)
+	conn, err := server.Accept()
+	if err != nil {
 		return
 	}
+	fmt.Printf("%s connected\n", conn.RemoteAddr().String())
+
+	reader := bufio.NewReader(conn)
+	var msgSize int32
+	err = binary.Read(reader, binary.BigEndian, &msgSize)
+	if err != nil {
+		fmt.Printf("Fail to read msg size:%s", err)
+		return
+	}
+	buf := make([]byte, msgSize)
+	n, err := io.ReadFull(reader, buf)
+	fmt.Printf("Message received, length: %d bytes\n", n)
+
+	respBuf, err := EncodeCommand(&response, SerialTypeJson)
+	conn.Write(respBuf)
+	fmt.Printf("Write response to client, length: %d\n", len(respBuf))
+	conn.Close()
 }
 
 func TestWriteAndReadCmd(t *testing.T) {
@@ -96,10 +101,10 @@ func TestWriteAndReadCmd(t *testing.T) {
 	}
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	err = conn.WriteCommand(ctx, &request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wg.Wait()
-	cancel()
 }

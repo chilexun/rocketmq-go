@@ -23,7 +23,7 @@ func TestCommandCodec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decodedCmd, err := DecodeCommand(encoded)
+	decodedCmd, err := DecodeCommand(encoded[4:])
 	if err != nil {
 		t.Fatal(err)
 	}

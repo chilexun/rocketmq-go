@@ -118,12 +118,6 @@ func EncodeCommand(c *Command, serialType SerializeType) ([]byte, error) {
 //DecodeCommand decode the byte array from server
 func DecodeCommand(data []byte) (cmd *Command, err error) {
 	buffer := bytes.NewBuffer(data)
-	var length int32
-	err = binary.Read(buffer, binary.BigEndian, &length)
-	if err != nil {
-		return
-	}
-
 	var mark int32
 	err = binary.Read(buffer, binary.BigEndian, &mark)
 	if err != nil {
@@ -138,10 +132,11 @@ func DecodeCommand(data []byte) (cmd *Command, err error) {
 	}
 	cmd, err = CmdHeaderCodecs[serialType].Decode(headerData)
 	if err != nil {
+		logger.Errorf("Decode server response using serialType(%d) error, Err: %s", serialType, err)
 		return
 	}
 
-	bodyLength := length - 4 - headerLength
+	bodyLength := len(data) - 4 - int(headerLength)
 	if bodyLength > 0 {
 		body := make([]byte, bodyLength)
 		_, err = buffer.Read(body)

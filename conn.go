@@ -2,7 +2,6 @@ package mqclient
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -15,6 +14,7 @@ import (
 	"time"
 )
 
+//ConnEventListener will be callback by conn
 type ConnEventListener interface {
 	//OnMessage is invoked when received a response
 	OnMessage(*Command)
@@ -31,7 +31,7 @@ type commandHolder struct {
 	ctx context.Context
 }
 
-//Conn represent a conn to nameserv/broker
+//Conn represents a conn to nameserv/broker
 type Conn struct {
 	config      *ClientConfig
 	conn        net.Conn
@@ -44,6 +44,7 @@ type Conn struct {
 	wg          sync.WaitGroup
 }
 
+//NewConn returns a connection and has not connected
 func NewConn(addr string, config *ClientConfig, respHandler ConnEventListener) *Conn {
 	return &Conn{
 		addr:        addr,
@@ -54,6 +55,7 @@ func NewConn(addr string, config *ClientConfig, respHandler ConnEventListener) *
 	}
 }
 
+//Connect try to establish connection with server and r/w message
 func (c *Conn) Connect() error {
 	dialer := &net.Dialer{
 		LocalAddr: c.config.LocalAddr,
@@ -77,22 +79,25 @@ func (c *Conn) Connect() error {
 	return nil
 }
 
+//Close the connection with server and stop to receive command
 func (c *Conn) Close() (err error) {
 	c.stopper.Do(func() {
 		atomic.StoreInt32(&c.closeFlag, 1)
 		err = c.conn.Close()
-		c.wg.Wait()
 		close(c.cmdChan)
+		c.wg.Wait()
 		close(c.respChan)
 		c.respHandler.OnClosed(c)
 	})
 	return
 }
 
+//IsActive tests if the connection is availible
 func (c *Conn) IsActive() bool {
 	return atomic.LoadInt32(&c.closeFlag) == 0
 }
 
+//GetAddr returns the remote ip address&port
 func (c *Conn) GetAddr() string {
 	return c.addr
 }
@@ -178,6 +183,9 @@ func (c *Conn) writeLoop() {
 	var cmdHolder commandHolder
 	for atomic.LoadInt32(&c.closeFlag) == 0 {
 		cmdHolder = <-c.cmdChan
+		if cmdHolder.cmd == nil {
+			return //cmdChan is closed
+		}
 		err := cmdHolder.ctx.Err()
 		if err != nil {
 			logger.Warnf("Command discard since timeout, %d", cmdHolder.cmd.Opaque)
@@ -186,11 +194,7 @@ func (c *Conn) writeLoop() {
 
 		data, err := EncodeCommand(cmdHolder.cmd, SerializeType(c.config.SerializeType))
 		if err == nil {
-			buf := new(bytes.Buffer)
-			binary.Write(buf, binary.BigEndian, int32(len(data)))
-			buf.Write(data)
-
-			_, err = buf.WriteTo(c)
+			_, err = c.Write(data)
 			if err != nil && atomic.LoadInt32(&c.closeFlag) != 1 {
 				logger.Warnf("Command discard since conn closed, %d", cmdHolder.cmd.Opaque)
 				return
