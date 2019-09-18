@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+//A RPCClient contains method to fetch/return connections and initate rpc request
 type RPCClient interface {
 	InvokeSync(addr string, request *Command, timeout time.Duration) (*Command, error)
 	GetActiveConn(addr string) (*Conn, error)
@@ -26,6 +27,7 @@ type pendingResponse struct {
 	err error
 }
 
+//NewRPCClient returns a new default RPCClient
 func NewRPCClient(config *ClientConfig) RPCClient {
 	return &defaultRPCClient{config: config}
 }
@@ -140,6 +142,6 @@ func (c *defaultRPCClient) closeChan(requestID int32) {
 	v, ok := c.reqCache.Load(requestID)
 	if ok {
 		c.reqCache.Delete(requestID)
-		close(v.(chan *Command))
+		close(v.(chan *pendingResponse))
 	}
 }

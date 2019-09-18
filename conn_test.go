@@ -56,7 +56,7 @@ func init() {
 	request = SendMessage(req)
 	respExt := map[string]string{"msgId": "1001", "queueId": "1", "queueOffset": "1"}
 	response = Command{Opaque: 1, Code: int(Success), ExtFields: respExt, Remark: "Hello, Welcome"}
-	wg.Add(1)
+
 	go startTCPServer()
 }
 
@@ -100,6 +100,8 @@ func TestWriteAndReadCmd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
+
+	wg.Add(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err = conn.WriteCommand(ctx, &request)
