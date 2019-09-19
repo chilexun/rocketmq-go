@@ -135,6 +135,7 @@ func (client *MQClient) SendMessageRequest(brokerAddr string, mq *MessageQueue,
 }
 
 func (client *MQClient) startScheduledTask() {
+	client.executer.Start()
 	//fetch nameserv addrs if no nameserv supplied
 	client.executer.AddJob(10*time.Second, 2*time.Minute, client.fetchNameServAddr)
 	//sync topic router from nameserv

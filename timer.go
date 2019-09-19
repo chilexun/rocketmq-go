@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// time wheel struct
+// TimeWheel specifies a timer scheduler
 type TimeWheel struct {
 	interval   time.Duration
 	ticker     *time.Ticker
@@ -18,7 +18,7 @@ type TimeWheel struct {
 	stopChan   chan bool
 }
 
-// Job callback function
+// Runnable is job callback function
 type Runnable func()
 
 // job struct
@@ -30,7 +30,7 @@ type job struct {
 	running  int32
 }
 
-// New create a empty time wheel
+// NewTimeWheel create a empty time wheel and should be started
 func NewTimeWheel(interval time.Duration, slotNum int) *TimeWheel {
 	if interval <= 0 || slotNum <= 0 {
 		return nil
@@ -72,7 +72,7 @@ func (tw *TimeWheel) Stop() {
 	tw.stopChan <- true
 }
 
-// AddTask add new task to the time wheel
+// AddJob add a new task to the time wheel
 func (tw *TimeWheel) AddJob(initialDelay time.Duration, interval time.Duration, runFunc Runnable) error {
 	if initialDelay < 0 {
 		return errors.New("illegal initail delay value, must not be lt 0")
@@ -146,7 +146,7 @@ func (tw *TimeWheel) runJob(job *job) {
 func (tw *TimeWheel) getPositionAndCircle(d time.Duration) (pos int, circle int) {
 	delaySeconds := int(d.Seconds())
 	intervalSeconds := int(tw.interval.Seconds())
-	circle = int(delaySeconds / intervalSeconds / tw.slotNum)
-	pos = int(tw.currentPos+delaySeconds/intervalSeconds) % tw.slotNum
+	circle = (delaySeconds - 1) / intervalSeconds / tw.slotNum
+	pos = (tw.currentPos + delaySeconds/intervalSeconds) % tw.slotNum
 	return
 }
