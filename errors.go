@@ -4,6 +4,7 @@ import (
 	"fmt"
 )
 
+//MQBrokerError represents the error from broker
 type MQBrokerError struct {
 	Code       ResponseCode
 	ErrMessage string

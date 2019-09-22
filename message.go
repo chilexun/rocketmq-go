@@ -64,11 +64,11 @@ var counter int32
 var validTopic = regexp.MustCompile(`^[%|a-zA-Z0-9_-]{1, 255}$`)
 
 func init() {
-	buf := bytes.NewBuffer(make([]byte, 4+2+4))
+	buf := new(bytes.Buffer) //length: 4+2+4
 	buf.Write(GetIPAddr())
 	binary.Write(buf, binary.BigEndian, int16(os.Getpid()))
 	binary.Write(buf, binary.BigEndian, rand.Int31())
-	fixMsgIDPrefix = buf.String()
+	fixMsgIDPrefix = strings.ToUpper(hex.EncodeToString(buf.Bytes()))
 	resetStartTime()
 }
 
@@ -79,7 +79,7 @@ func resetStartTime() {
 	if !now.After(nextStartTime) {
 		return
 	}
-	startTime = time.Date(now.Year(), now.Month(), 0, 0, 0, 0, 0, time.Local)
+	startTime = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
 	nextStartTime = startTime.AddDate(0, 1, 0)
 }
 
@@ -118,14 +118,14 @@ func (m *Message) GetUniqID() string {
 func GenerateUniqMsgID() string {
 	var builder strings.Builder
 	builder.WriteString(fixMsgIDPrefix)
-	buf := bytes.NewBuffer(make([]byte, 4+2))
+	buf := new(bytes.Buffer)
 	if time.Now().After(nextStartTime) {
 		resetStartTime()
 	}
-	gap := time.Now().Sub(startTime).Nanoseconds() / 1e6
+	gap := time.Since(startTime).Nanoseconds() / 1e6
 	binary.Write(buf, binary.BigEndian, int32(gap))
 	binary.Write(buf, binary.BigEndian, int16(atomic.AddInt32(&counter, 1)))
-	builder.WriteString(hex.Dump(buf.Bytes()))
+	builder.WriteString(strings.ToUpper(hex.EncodeToString(buf.Bytes())))
 	return builder.String()
 }
 
@@ -134,7 +134,7 @@ func ValidateMsg(m *Message) error {
 	if !validTopic.MatchString(m.Topic) {
 		return fmt.Errorf("The specified topic[%s] contains illegal characters or has invalid length", m.Topic)
 	}
-	if AutoCreateTopicKeyTopic == AutoCreateTopicKeyTopic {
+	if AutoCreateTopicKeyTopic == m.Topic {
 		return fmt.Errorf("The topic[%s] is conflict with AUTO_CREATE_TOPIC_KEY_TOPIC", m.Topic)
 	}
 	if m.Body == nil || len(m.Body) == 0 || len(m.Body) > MaxMessageSize {

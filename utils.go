@@ -12,27 +12,26 @@ import (
 func GetIPAddr() net.IP {
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
-		var internelIp net.IP
+		var internelIP net.IP
 		for _, addr := range addrs {
 			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 				ipv4 := ipnet.IP.To4()
-				if ipv4 != nil && isValidIp(ipv4) {
+				if ipv4 != nil && isValidIP(ipv4) {
 					if !isInternalAddr(ipv4) {
 						return ipv4
-					} else {
-						internelIp = ipv4
 					}
+					internelIP = ipv4
 				}
 			}
 		}
-		if internelIp != nil {
-			return internelIp
+		if internelIP != nil {
+			return internelIP
 		}
 	}
 	panic(err)
 }
 
-func isValidIp(ip []byte) bool {
+func isValidIP(ip []byte) bool {
 	if ip[0] >= 1 && ip[0] <= 126 {
 		if ip[1] == 1 && ip[2] == 1 && ip[3] == 1 {
 			return false

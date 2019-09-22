@@ -85,7 +85,7 @@ func (c *ProducerConfig) Validate() error {
 	}
 	err := validate(c)
 	if err == nil {
-		if c.ClientConfig.SerializeType != SerialTypeJson && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
+		if c.ClientConfig.SerializeType != SerialTypeJSON && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
 			return errors.New("Invalid SerializeType value")
 		}
 		err = validate(&c.ClientConfig)
@@ -100,7 +100,7 @@ func (c *ConsumerConfig) Validate() error {
 	}
 	err := validate(c)
 	if err == nil {
-		if c.ClientConfig.SerializeType != SerialTypeJson && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
+		if c.ClientConfig.SerializeType != SerialTypeJSON && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
 			return errors.New("Invalid SerializeType value")
 		}
 		err = validate(&c.ClientConfig)

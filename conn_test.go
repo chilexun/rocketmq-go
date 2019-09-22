@@ -85,7 +85,7 @@ func startTCPServer() {
 	n, err := io.ReadFull(reader, buf)
 	fmt.Printf("Message received, length: %d bytes\n", n)
 
-	respBuf, err := EncodeCommand(&response, SerialTypeJson)
+	respBuf, err := EncodeCommand(&response, SerialTypeJSON)
 	conn.Write(respBuf)
 	fmt.Printf("Write response to client, length: %d\n", len(respBuf))
 	conn.Close()

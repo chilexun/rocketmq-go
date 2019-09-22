@@ -13,6 +13,13 @@ const (
 	MasterBrokerID int = 1
 )
 
+//MessageQueue represents a queue of specefic topic on the broker
+type MessageQueue struct {
+	Topic      string
+	BrokerName string
+	QueueID    int
+}
+
 //QueueData represents the broker queue info
 type QueueData struct {
 	BrokerName     string

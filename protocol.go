@@ -114,13 +114,13 @@ type SerializeType byte
 
 //Enum of command serialize type
 const (
-	SerialTypeJson     SerializeType = 0
+	SerialTypeJSON     SerializeType = 0
 	SerialTypeRocketMQ SerializeType = 1
 )
 
 //CmdHeaderCodecs contains implements
 var CmdHeaderCodecs = map[SerializeType]CmdHeaderCodec{
-	SerialTypeJson:     new(jsonCodec),
+	SerialTypeJSON:     new(jsonCodec),
 	SerialTypeRocketMQ: new(rocketMQCodec),
 }
 

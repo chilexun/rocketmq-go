@@ -7,18 +7,14 @@ import (
 	"time"
 )
 
-type MessageQueue struct {
-	Topic      string
-	BrokerName string
-	QueueId    int
-}
-
+//SendStats represents a send request statistic
 type SendStats struct {
 	BrokerName string
 	latency    time.Duration
 	isFail     bool
 }
 
+//MQSelectStrategy is the strategy of select which queue to send message
 type MQSelectStrategy interface {
 	SelectOneMessageQueue(topicInfo *TopicPublishInfo, lastBrokerName string) MessageQueue
 	UpdateSendStats(stats SendStats)
@@ -29,6 +25,7 @@ var latencyMax = [7]time.Duration{50 * time.Millisecond, 100 * time.Millisecond,
 var notAvailable = [7]time.Duration{0 * time.Millisecond, 0 * time.Millisecond, 30000 * time.Millisecond,
 	60000 * time.Millisecond, 120000 * time.Millisecond, 180000 * time.Millisecond, 600000 * time.Millisecond}
 
+//LatencyFaultStrategy is a strategy which consider send latency
 type LatencyFaultStrategy struct {
 	latencyTable sync.Map
 }
@@ -39,10 +36,12 @@ type latencyItem struct {
 	latency    time.Duration
 }
 
+//NewStrategy returns a strategy
 func NewStrategy() MQSelectStrategy {
 	return &LatencyFaultStrategy{}
 }
 
+//SelectOneMessageQueue returns the queue selected
 func (s *LatencyFaultStrategy) SelectOneMessageQueue(topicInfo *TopicPublishInfo, lastBrokerName string) MessageQueue {
 	queueNumber := topicInfo.GetQueueNumber()
 	for i := 0; i < queueNumber; i++ {
@@ -58,15 +57,15 @@ func (s *LatencyFaultStrategy) SelectOneMessageQueue(topicInfo *TopicPublishInfo
 		if writeQueueNums > 0 {
 			mq := topicInfo.GetNextQueue()
 			mq.BrokerName = notBestBroker
-			mq.QueueId = rand.Intn(writeQueueNums)
+			mq.QueueID = rand.Intn(writeQueueNums)
 			return mq
-		} else {
-			s.latencyTable.Delete(notBestBroker)
 		}
+		s.latencyTable.Delete(notBestBroker)
 	}
 	return topicInfo.GetNextQueue()
 }
 
+//UpdateSendStats set the queue statistics to strategy
 func (s *LatencyFaultStrategy) UpdateSendStats(stats SendStats) {
 	latency := stats.latency
 	if stats.isFail {
@@ -135,5 +134,5 @@ func (s *LatencyFaultStrategy) pickOneBroker() string {
 }
 
 func (i *latencyItem) isAvaliable() bool {
-	return time.Since(i.started) > i.latency
+	return i.latency == 0 || time.Since(i.started) > i.latency
 }

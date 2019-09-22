@@ -5,6 +5,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+//LogLevel specifies the log levels
 type LogLevel int8
 
 const (
@@ -28,6 +29,7 @@ const (
 	Fatal = LogLevel(zapcore.FatalLevel)
 )
 
+//Logger write the log info with specify level
 type Logger interface {
 	Info(args ...interface{})
 	Warn(args ...interface{})
@@ -65,15 +67,17 @@ func init() {
 	logger = zapLogger.Sugar()
 }
 
+//SetLogger replace the logger with self define impl
 func SetLogger(customLogger Logger) {
 	logger = customLogger
 }
 
+//GetLogger returns the logger current used
 func GetLogger() Logger {
 	return logger
 }
 
-// SetLogLevel
+// SetLogLevel change the log level and realtime effective
 func SetLogLevel(level LogLevel) error {
 	zapLoggerConfig.Level = zap.NewAtomicLevelAt(zapcore.Level(level))
 	zapLogger, err := zapLoggerConfig.Build()

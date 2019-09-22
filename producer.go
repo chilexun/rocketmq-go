@@ -201,7 +201,7 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, timeout
 	request := &SendMessageRequest{
 		ProducerGroup:  p.producerGroup,
 		Topic:          mq.Topic,
-		QueueID:        mq.QueueId,
+		QueueID:        mq.QueueID,
 		SysFlag:        sysFlag,
 		BornTimestamp:  time.Now().UnixNano() / 1e6,
 		Flag:           msg.Flag,

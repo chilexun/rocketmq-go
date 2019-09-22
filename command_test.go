@@ -19,7 +19,7 @@ func TestCommandCodec(t *testing.T) {
 		Body:          []byte(body),
 	}
 	cmd := SendMessage(request)
-	encoded, err := EncodeCommand(&cmd, SerialTypeJson)
+	encoded, err := EncodeCommand(&cmd, SerialTypeJSON)
 	if err != nil {
 		t.Fatal(err)
 	}
