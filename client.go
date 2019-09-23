@@ -44,7 +44,6 @@ type MQClient struct {
 	status        ServiceState
 	executer      *TimeWheel
 	hbState       int32
-	brokerMap     sync.Map
 	brokerVerMap  sync.Map
 	nameServAddrs []string
 	nameserv      atomic.Value
@@ -148,7 +147,7 @@ func (client *MQClient) startScheduledTask() {
 func (client *MQClient) SendHeartbeatToBrokers() {
 	if atomic.CompareAndSwapInt32(&client.hbState, 0, 1) {
 		defer atomic.StoreInt32(&client.hbState, 0)
-		client.brokerMap.Range(func(k interface{}, v interface{}) bool {
+		client.topicManager.brokerAddrTable.Range(func(k interface{}, v interface{}) bool {
 			brokers := v.(map[int]string)
 			for brokerID, brokerAddr := range brokers {
 				if brokerID == 1 {

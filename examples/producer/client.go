@@ -4,12 +4,22 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	mqclient "github.com/chilexun/rocketmq-go"
 )
 
-func sendMessage() {
-
+func sendMessage(producer mqclient.Producer) {
+	msg := mqclient.Message{
+		Topic: "TopicGoTest",
+		Body:  []byte("Hello, go client!"),
+	}
+	result, err := producer.Send(msg, time.Second)
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println(&result)
+	}
 }
 
 func main() {
@@ -26,7 +36,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	go sendMessage()
+	go sendMessage(producer)
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, os.Kill)

@@ -13,8 +13,8 @@ import (
 type ClientConfig struct {
 	NamesrvAddr             []string
 	WsAddr                  string
-	PollNameServerInterval  time.Duration `min:"100ms" default:"60s"`
-	HeartbeatBrokerInterval time.Duration `min:"100ms" default:"60s"`
+	PollNameServerInterval  time.Duration `min:"100ms" default:"30s"`
+	HeartbeatBrokerInterval time.Duration `min:"100ms" default:"30s"`
 	InstanceName            string        `default:"DEFAULT"`
 	ConnectTimeout          time.Duration `min:"100ms" max:"5m" default:"60s"`
 	ReadTimeout             time.Duration `min:"100ms" max:"5m" default:"60s"`

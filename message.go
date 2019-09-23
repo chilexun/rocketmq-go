@@ -61,7 +61,7 @@ var nextStartTime time.Time
 var mutex sync.Mutex
 var counter int32
 
-var validTopic = regexp.MustCompile(`^[%|a-zA-Z0-9_-]{1, 255}$`)
+var validTopic = regexp.MustCompile(`^[%|a-zA-Z0-9_-]{1,255}$`)
 
 func init() {
 	buf := new(bytes.Buffer) //length: 4+2+4

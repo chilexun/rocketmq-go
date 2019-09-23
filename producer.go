@@ -1,6 +1,7 @@
 package mqclient
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -34,6 +35,15 @@ type SendResult struct {
 	TransactionID string
 	OffsetMsgID   string
 	RegionID      string
+}
+
+func (r *SendResult) String() string {
+	var builder strings.Builder
+	json, _ := json.Marshal(r)
+	builder.WriteString("Send Result [")
+	builder.Write(json)
+	builder.WriteByte(']')
+	return builder.String()
 }
 
 //Producer is a rocketmq producer client interface
