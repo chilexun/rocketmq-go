@@ -147,29 +147,23 @@ func (client *MQClient) startScheduledTask() {
 func (client *MQClient) SendHeartbeatToBrokers() {
 	if atomic.CompareAndSwapInt32(&client.hbState, 0, 1) {
 		defer atomic.StoreInt32(&client.hbState, 0)
-		client.topicManager.brokerAddrTable.Range(func(k interface{}, v interface{}) bool {
-			brokers := v.(map[int]string)
-			for brokerID, brokerAddr := range brokers {
-				if brokerID == 1 {
-					client.sendHeartbeatToBroker(k.(string), brokerAddr)
-				}
-			}
-			return true
-		})
+		for name, addr := range client.topicManager.GetBrokerAddrTable() {
+			client.sendHeartbeatToBroker(name, addr)
+		}
 	}
 }
 
 func (client *MQClient) sendHeartbeatToBroker(brokerName string, brokerAddr string) {
-	heartbeat := HeartbeatData{clientID: client.clientID}
+	heartbeat := HeartbeatData{ClientID: client.clientID}
 	groups := GetAllProducerGroups()
 	if len(groups) <= 0 {
 		return
 	}
-	heartbeat.producerDataSet = make([]ProducerData, len(groups))
+	heartbeat.ProducerDataSet = make([]ProducerData, len(groups))
 	for i, group := range groups {
-		heartbeat.producerDataSet[i] = ProducerData{group}
+		heartbeat.ProducerDataSet[i] = ProducerData{group}
 	}
-	cmd := HeartBeat(heartbeat)
+	cmd := HeartBeat(&heartbeat)
 	resp, err := client.rpcClient.InvokeSync(brokerAddr, &cmd, 3*time.Second)
 	if err != nil {
 		logger.Errorf("Send heartbeat to broker %s(%s), Error:%s", brokerName, brokerAddr, err)
@@ -182,9 +176,12 @@ func (client *MQClient) sendHeartbeatToBroker(brokerName string, brokerAddr stri
 	if verMap, ok := client.brokerVerMap.Load(brokerName); ok {
 		verMap.(map[string]int)[brokerAddr] = version
 	} else {
-		newMap := make(map[string]int, 4)
-		newMap[brokerAddr] = version
+		verMap := make(map[string]int)
+		verMap[brokerAddr] = version
 		client.brokerVerMap.Store(brokerName, verMap)
+	}
+	if rand.Intn(20) == 1 {
+		logger.Infof("Heartbeat to broker %s, version: %d", brokerAddr, version)
 	}
 }
 
@@ -271,14 +268,87 @@ func (client *MQClient) syncTopicFromNameserv(topic string) {
 	if code == TopicNotExist {
 		logger.Errorf("Get route failed since TOPIC NOT EXIST, topic:%s", topic)
 	} else if code == Success {
-		routeData := new(TopicRouteData)
-		err := json.Unmarshal(body, &routeData)
+		routeData, err := parseTopicRouteData(body)
 		if err != nil {
 			logger.Error("Decode topic route data failed, topic:"+topic, err)
 			return
 		}
 		client.topicManager.SetTopicRouteData(topic, routeData)
 	}
+}
+
+func parseTopicRouteData(body []byte) (*TopicRouteData, error) {
+	kvMap, err := ParseObject(body)
+	if err != nil {
+		return nil, err
+	}
+	routeData := &TopicRouteData{
+		queueDatas:        make([]QueueData, 0),
+		filterServerTable: make(map[string][]string),
+	}
+	for k, v := range kvMap {
+		switch k {
+		case "orderTopicConf":
+			routeData.OrderTopicConf = string(v)
+		case "queueDatas":
+			err = json.Unmarshal(v, &routeData.queueDatas)
+			if err != nil {
+				return nil, err
+			}
+		case "brokerDatas":
+			bd, err := ParseArray(v)
+			if err != nil {
+				return nil, err
+			}
+			brokers := make([]BrokerData, len(bd))
+			for i, d := range bd {
+				broker, err := parseBrokerData(d)
+				if err != nil {
+					return nil, err
+				}
+				brokers[i] = *broker
+			}
+			routeData.brokerDatas = brokers
+		case "filterServerTable":
+			err = json.Unmarshal(v, &routeData.filterServerTable)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return routeData, nil
+}
+
+func parseBrokerData(d []byte) (*BrokerData, error) {
+	m, err := ParseObject(d)
+	if err != nil {
+		return nil, err
+	}
+	broker := &BrokerData{
+		cluster:     string(m["cluster"]),
+		brokerName:  string(m["brokerName"]),
+		brokerAddrs: make(map[int]string),
+	}
+
+	d, ok := m["brokerAddrs"]
+	if !ok {
+		return broker, nil
+	}
+
+	m, err = ParseObject(d)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range m {
+		id, err := strconv.Atoi(string(k))
+		if err != nil {
+			return nil, err
+		}
+		broker.brokerAddrs[int(id)] = string(v)
+	}
+
+	return broker, nil
 }
 
 func (client *MQClient) selectActiveNameServ() string {
@@ -296,11 +366,9 @@ func (client *MQClient) selectActiveNameServ() string {
 	addrList := client.nameServAddrs
 	index := rand.Intn(len(addrList))
 	for i := 0; i < len(addrList); i++ {
-		if preValue == nil || preValue.(string) != addrList[index] {
-			client.nameserv.Store(addrList[index])
-			if _, err := client.rpcClient.GetActiveConn(addrList[index]); err == nil {
-				return addrList[index]
-			}
+		client.nameserv.Store(addrList[index])
+		if _, err := client.rpcClient.GetActiveConn(addrList[index]); err == nil {
+			return addrList[index]
 		}
 		index++
 		index %= len(addrList)

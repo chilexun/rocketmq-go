@@ -106,11 +106,17 @@ func NewMessage(topic string, body []byte) Message {
 
 //SetUniqID set a new id for message
 func (m *Message) SetUniqID(id string) {
+	if m.Properties == nil {
+		m.Properties = make(map[string]string)
+	}
 	m.Properties[MessageUniqClientMessageIDKeyIdx] = id
 }
 
 //GetUniqID returns the message uniq id
 func (m *Message) GetUniqID() string {
+	if m.Properties == nil {
+		return ""
+	}
 	return m.Properties[MessageUniqClientMessageIDKeyIdx]
 }
 

@@ -10,10 +10,7 @@ import (
 )
 
 func sendMessage(producer mqclient.Producer) {
-	msg := mqclient.Message{
-		Topic: "TopicGoTest",
-		Body:  []byte("Hello, go client!"),
-	}
+	msg := mqclient.NewMessage("TopicGoTest", []byte("Hello, go client!"))
 	result, err := producer.Send(msg, time.Second)
 	if err != nil {
 		fmt.Println(err)
@@ -24,8 +21,8 @@ func sendMessage(producer mqclient.Producer) {
 
 func main() {
 	config := mqclient.NewProducerConfig()
-	config.NamesrvAddr = []string{"192.168.199.171:9876"}
-	producer, err := mqclient.NewProducer("TopicGoTest", config)
+	config.NamesrvAddr = []string{"10.128.105.104:9876"}
+	producer, err := mqclient.NewProducer("PID_GO_TEST", config)
 	if err != nil {
 		fmt.Println(err)
 		return

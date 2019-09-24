@@ -136,6 +136,7 @@ func (c *defaultRPCClient) OnClosed(conn *Conn) {
 			c.connMap.Delete(addr)
 		}
 	}
+	logger.Infof("Connection closed, %s", addr)
 }
 
 func (c *defaultRPCClient) closeChan(requestID int32) {

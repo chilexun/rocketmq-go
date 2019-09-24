@@ -10,7 +10,7 @@ import (
 
 //MasterBrokerID is the ID of master in cluster
 const (
-	MasterBrokerID int = 1
+	MasterBrokerID int = 0
 )
 
 //MessageQueue represents a queue of specefic topic on the broker
@@ -97,7 +97,7 @@ func toPublishInfo(topic string, route *TopicRouteData) *TopicPublishInfo {
 			if PermitWrite(qd.Perm) {
 				for _, bd := range route.brokerDatas {
 					if bd.brokerName == qd.BrokerName {
-						if _, ok := bd.brokerAddrs[1]; ok {
+						if _, ok := bd.brokerAddrs[MasterBrokerID]; ok {
 							for i := 0; i < qd.WriteQueueNums; i++ {
 								mq := MessageQueue{topic, qd.BrokerName, i}
 								info.MsgQueues = append(info.MsgQueues, mq)
@@ -190,4 +190,19 @@ func (m *TopicRouteInfoManager) GetBrokerAddrByName(brokerName string, vipPrefer
 		}
 	}
 	return ""
+}
+
+//GetBrokerAddrTable returns a copy of cached brokers, key: brokerName, value: brokerAddress
+func (m *TopicRouteInfoManager) GetBrokerAddrTable() map[string]string {
+	result := make(map[string]string)
+	m.brokerAddrTable.Range(func(k interface{}, v interface{}) bool {
+		brokers := v.(map[int]string)
+		for brokerID, brokerAddr := range brokers {
+			if brokerID == MasterBrokerID {
+				result[k.(string)] = brokerAddr
+			}
+		}
+		return true
+	})
+	return result
 }

@@ -16,6 +16,7 @@ type Command struct {
 	Code      int               `json:"code"`
 	Opaque    int32             `json:"opaque"`
 	Version   int               `json:"version"`
+	Language  string            `json:"language,omitempty"`
 	Body      []byte            `json:"-"`
 	Remark    string            `json:"remark,omitempty"`
 	ExtFields map[string]string `json:"extFields,omitempty"`
@@ -71,6 +72,15 @@ func (r *SendMessageResponse) fromExtFields(fields map[string]string) (err error
 	return
 }
 
+func newCommand(code RequestCode) *Command {
+	return &Command{
+		Opaque:   getRequestID(),
+		Code:     int(code),
+		Language: "GO",
+		Version:  MQVersionV4_3_0,
+	}
+}
+
 func getRequestID() int32 {
 	return atomic.AddInt32(&requestID, 1)
 }
@@ -79,18 +89,25 @@ func getRequestID() int32 {
 func GetRouteInfo(topic string) Command {
 	header := make(map[string]string, 1)
 	header["topic"] = topic
-	return Command{Opaque: getRequestID(), Code: int(GetRouteInfoByTopicReq), ExtFields: header}
+	cmd := newCommand(GetRouteInfoByTopicReq)
+	cmd.ExtFields = header
+	return *cmd
 }
 
 //SendMessage create a SendMessage command
 func SendMessage(request *SendMessageRequest) Command {
-	return Command{Opaque: getRequestID(), Code: int(SendMessageReq), Body: request.Body, ExtFields: request.toExtFields()}
+	cmd := newCommand(SendMessageReq)
+	cmd.Body = request.Body
+	cmd.ExtFields = request.toExtFields()
+	return *cmd
 }
 
 //HeartBeat create a HeartBeat command
-func HeartBeat(data HeartbeatData) Command {
+func HeartBeat(data *HeartbeatData) Command {
 	body, _ := json.Marshal(data)
-	return Command{Opaque: getRequestID(), Code: int(HeartBeatReq), Body: body}
+	cmd := newCommand(HeartBeatReq)
+	cmd.Body = body
+	return *cmd
 }
 
 //EncodeCommand encode the command with the specify serial type

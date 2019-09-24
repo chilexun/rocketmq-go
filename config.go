@@ -16,8 +16,8 @@ type ClientConfig struct {
 	PollNameServerInterval  time.Duration `min:"100ms" default:"30s"`
 	HeartbeatBrokerInterval time.Duration `min:"100ms" default:"30s"`
 	InstanceName            string        `default:"DEFAULT"`
-	ConnectTimeout          time.Duration `min:"100ms" max:"5m" default:"60s"`
-	ReadTimeout             time.Duration `min:"100ms" max:"5m" default:"60s"`
+	ConnectTimeout          time.Duration `min:"100ms" max:"5m" default:"3s"`
+	ReadTimeout             time.Duration `min:"100ms" max:"5m" default:"120s"`
 	WriteTimeout            time.Duration `min:"100ms" max:"5m" default:"1s"`
 	LocalAddr               net.Addr
 	TLSConfig               *tls.Config

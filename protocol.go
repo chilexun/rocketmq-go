@@ -2,6 +2,9 @@ package mqclient
 
 import "encoding/json"
 
+//MQVersionV4_3_0 is current Go client version
+const MQVersionV4_3_0 = 273
+
 //RequestCode specifies the code of request
 type RequestCode int
 
@@ -13,8 +16,12 @@ const (
 	QueryBrokerOffsetReq
 	QueryConsumerOffsetReq
 	UpdateConsumerOffsetReq
-	UpdateAndCreateTopicReq RequestCode = 17
-	GetAllTopicConfigReq    RequestCode = iota + 21
+	_
+	UpdateAndCreateTopicReq
+	_
+	_
+	_
+	GetAllTopicConfigReq
 	GetTopicConfigListReq
 	GetTopicNameListReq
 	_
@@ -160,17 +167,17 @@ func (c *rocketMQCodec) Decode(b []byte) (*Command, error) {
 
 //ProducerData represents the producer group
 type ProducerData struct {
-	groupName string
+	GroupName string `json:"groupName"`
 }
 
 //ConsumerType represents the consumer type
 type ConsumerType struct {
-	typeCN string
+	TypeCN string `json:"typeCN"`
 }
 
 //MessageModel represents message model
 type MessageModel struct {
-	modeCN string
+	ModeCN string `json:"modeCN"`
 }
 
 //ConsumeFromWhere specifies the offset type
@@ -194,30 +201,30 @@ const (
 
 //SubscriptionData represents the subscription config
 type SubscriptionData struct {
-	classFilterMode bool
-	topic           string
-	subString       string
-	tagsSet         []string
-	codeSet         []int
-	subVersion      int64
-	expressionType  ExpressionType
+	ClassFilterMode bool           `json:"classFilterMode"`
+	Topic           string         `json:"topic"`
+	SubString       string         `json:"subString"`
+	TagsSet         []string       `json:"tagsSet"`
+	CodeSet         []int          `json:"codeSet"`
+	SubVersion      int64          `json:"subVersion"`
+	ExpressionType  ExpressionType `json:"expressionType"`
 }
 
 //ConsumerData represent the consumer config
 type ConsumerData struct {
-	groupName           string
-	consumeType         ConsumerType
-	messageModel        MessageModel
-	consumeFromWhere    ConsumeFromWhere
-	subscriptionDataSet []SubscriptionData
-	unitMode            bool
+	GroupName           string             `json:"groupName"`
+	ConsumeType         ConsumerType       `json:"consumeType,omitempty"`
+	MessageModel        MessageModel       `json:"messageModel,omitempty"`
+	ConsumeFromWhere    ConsumeFromWhere   `json:"consumeFromWhere"`
+	SubscriptionDataSet []SubscriptionData `json:"subscriptionDataSet,omitempty"`
+	UnitMode            bool               `json:"unitMode"`
 }
 
 //HeartbeatData represents the data part of heartbeat req
 type HeartbeatData struct {
-	clientID        string
-	producerDataSet []ProducerData
-	consumerDataSet []ConsumerData
+	ClientID        string         `json:"clientID"`
+	ProducerDataSet []ProducerData `json:"producerDataSet,omitempty"`
+	ConsumerDataSet []ConsumerData `json:"consumerDataSet,omitempty"`
 }
 
 //Permission is the type of queue permission
