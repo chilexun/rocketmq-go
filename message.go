@@ -64,6 +64,7 @@ var counter int32
 var validTopic = regexp.MustCompile(`^[%|a-zA-Z0-9_-]{1,255}$`)
 
 func init() {
+	rand.Seed(time.Now().Unix())
 	buf := new(bytes.Buffer) //length: 4+2+4
 	buf.Write(GetIPAddr())
 	binary.Write(buf, binary.BigEndian, int16(os.Getpid()))
@@ -94,7 +95,7 @@ type Message struct {
 
 //NewMessage create a message entity, the default value of WaitStoreMsgOK is true
 func NewMessage(topic string, body []byte) Message {
-	props := make(map[string]string, 1)
+	props := make(map[string]string)
 	props[MessageWaitStoreMsgOK] = "true"
 	return Message{
 		Topic:      topic,

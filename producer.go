@@ -252,6 +252,9 @@ func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, timeout
 }
 
 func setRetryHeader(header *SendMessageRequest, msgProps map[string]string) {
+	if msgProps == nil {
+		return
+	}
 	if reconsumeTimes := msgProps[MessageReconsumeTime]; reconsumeTimes != "" {
 		header.ReconsumeTimes, _ = strconv.Atoi(reconsumeTimes)
 		delete(msgProps, MessageReconsumeTime)
