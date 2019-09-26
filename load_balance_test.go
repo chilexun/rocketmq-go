@@ -8,7 +8,7 @@ import (
 )
 
 func TestLatencyStrategy(t *testing.T) {
-	strategy := NewStrategy()
+	strategy := NewSelectStrategy()
 	stats := SendStats{
 		BrokerName: "testBroker",
 		latency:    100 * time.Millisecond,
@@ -46,7 +46,7 @@ func TestLatencyStrategy(t *testing.T) {
 
 func TestSelectOneMessageQueue(t *testing.T) {
 	topicInfo := prepareTopicPublishInfo()
-	strategy := NewStrategy()
+	strategy := NewSelectStrategy()
 	for i := 0; i < 10; i++ {
 		mq := strategy.SelectOneMessageQueue(topicInfo, "testBroker0")
 		if mq.BrokerName != "testBroker0" {

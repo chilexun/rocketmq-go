@@ -57,7 +57,7 @@ type Producer interface {
 
 //SendCallback is async request callback handler
 type SendCallback interface {
-	onSuccess(SendResult SendResult)
+	onSuccess(result SendResult)
 	onError(err error)
 }
 
@@ -87,7 +87,7 @@ func NewProducer(producerGroup string, config *ProducerConfig) (Producer, error)
 		config:           *config,
 		status:           CreateJust,
 		instanceName:     instanceName,
-		mqSelectStrategy: NewStrategy(),
+		mqSelectStrategy: NewSelectStrategy(),
 	}
 	return p, nil
 }

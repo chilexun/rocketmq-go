@@ -149,3 +149,21 @@ func ValidateMsg(m *Message) error {
 	}
 	return nil
 }
+
+//MessageExt wraps message from broker with context info
+type MessageExt struct {
+	Message
+	QueueID                   int
+	StoreSize                 int
+	QueueOffset               int64
+	SysFlag                   int
+	BornTimestamp             int64
+	BornHost                  string
+	StoreTimestamp            int64
+	StoreHost                 string
+	MsgID                     string
+	CommitLogOffset           int64
+	BodyCRC                   int
+	ReconsumeTimes            int
+	PreparedTransactionOffset int64
+}

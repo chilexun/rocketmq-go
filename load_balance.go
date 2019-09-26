@@ -36,8 +36,8 @@ type latencyItem struct {
 	latency    time.Duration
 }
 
-//NewStrategy returns a strategy
-func NewStrategy() MQSelectStrategy {
+//NewSelectStrategy returns a strategy of select mq when send msg
+func NewSelectStrategy() MQSelectStrategy {
 	return &LatencyFaultStrategy{}
 }
 
@@ -135,4 +135,9 @@ func (s *LatencyFaultStrategy) pickOneBroker() string {
 
 func (i *latencyItem) isAvaliable() bool {
 	return i.latency == 0 || time.Since(i.started) > i.latency
+}
+
+//MQAllocateStrategy is the strategy of allocate mqs to consumers
+type MQAllocateStrategy interface {
+	AllocateMessageQueues(consumerGroup string, cid string, mqall []MessageQueue, cidAll []string) []MessageQueue
 }
