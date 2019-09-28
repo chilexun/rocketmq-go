@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"compress/zlib"
 	"net"
+	"regexp"
 	"runtime"
 	"sync/atomic"
 )
+
+//ValidGroupName specifies the group name reg expression
+var validGroupName = regexp.MustCompile(`^[%|a-zA-Z0-9_-]{1,255}$`)
 
 //GetIPAddr returns ipv4 addrs and external addr is prefered
 func GetIPAddr() net.IP {

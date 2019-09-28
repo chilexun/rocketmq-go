@@ -40,6 +40,14 @@ type ProducerConfig struct {
 //ConsumerConfig of rocketmq options
 type ConsumerConfig struct {
 	ClientConfig
+	MessageModel               MessageModelType
+	ConsumeFromWhere           ConsumeFromWhere
+	ConsumeTimestamp           time.Time
+	ConsumeConcurrentlyMaxSpan int `min:"1" max:"65535" default:"2000"`
+	PullThresholdForQueue      int `min:"1" max:"65535" default:"1000"`
+	ConsumeMessageBatchMaxSize int `min:"1" max:"1024" default:"1"`
+	PullBatchSize              int `min:"1" max:"1024" default:"32"`
+	MQAllocateStrategy         MQAllocateStrategyType
 }
 
 //NewProducerConfig return a new default producer configuration
@@ -85,7 +93,7 @@ func (c *ProducerConfig) Validate() error {
 	}
 	err := validate(c)
 	if err == nil {
-		if c.ClientConfig.SerializeType != SerialTypeJSON && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
+		if _, ok := cmdHeaderCodecs[c.ClientConfig.SerializeType]; !ok {
 			return errors.New("Invalid SerializeType value")
 		}
 		err = validate(&c.ClientConfig)
@@ -100,7 +108,10 @@ func (c *ConsumerConfig) Validate() error {
 	}
 	err := validate(c)
 	if err == nil {
-		if c.ClientConfig.SerializeType != SerialTypeJSON && c.ClientConfig.SerializeType != SerialTypeRocketMQ {
+		if _, ok := mqAllocateStratgies[c.MQAllocateStrategy]; !ok {
+			return errors.New("Invalid MQAllocateStrategyType value")
+		}
+		if _, ok := cmdHeaderCodecs[c.ClientConfig.SerializeType]; !ok {
 			return errors.New("Invalid SerializeType value")
 		}
 		err = validate(&c.ClientConfig)

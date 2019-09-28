@@ -137,6 +137,20 @@ func (i *latencyItem) isAvaliable() bool {
 	return i.latency == 0 || time.Since(i.started) > i.latency
 }
 
+//MQAllocateStrategyType specifies the supported allocated strategy
+type MQAllocateStrategyType int
+
+//allocate strategy names
+const (
+	MQAllocateAVG MQAllocateStrategyType = iota
+	MQAllocateAVGByCircle
+	MQAllocateConfig
+	MQAllocateMachineRoom
+	MQAllocateConsistentHash
+)
+
+var mqAllocateStratgies = map[MQAllocateStrategyType]MQAllocateStrategy{}
+
 //MQAllocateStrategy is the strategy of allocate mqs to consumers
 type MQAllocateStrategy interface {
 	AllocateMessageQueues(consumerGroup string, cid string, mqall []MessageQueue, cidAll []string) []MessageQueue

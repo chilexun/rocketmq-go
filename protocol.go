@@ -125,8 +125,7 @@ const (
 	SerialTypeRocketMQ SerializeType = 1
 )
 
-//CmdHeaderCodecs contains implements
-var CmdHeaderCodecs = map[SerializeType]CmdHeaderCodec{
+var cmdHeaderCodecs = map[SerializeType]CmdHeaderCodec{
 	SerialTypeJSON:     new(jsonCodec),
 	SerialTypeRocketMQ: new(rocketMQCodec),
 }
@@ -174,6 +173,15 @@ type ProducerData struct {
 type ConsumerType struct {
 	TypeCN string `json:"typeCN"`
 }
+
+//MessageModelType specifies the consume mode of consumer
+type MessageModelType int
+
+//Supported consume mode
+const (
+	ConsumeBroadcast MessageModelType = iota
+	ConsumeCluster
+)
 
 //MessageModel represents message model
 type MessageModel struct {

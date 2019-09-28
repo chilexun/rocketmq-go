@@ -113,7 +113,7 @@ func HeartBeat(data *HeartbeatData) Command {
 //EncodeCommand encode the command with the specify serial type
 func EncodeCommand(c *Command, serialType SerializeType) ([]byte, error) {
 	var length = 4
-	headerData, err := CmdHeaderCodecs[serialType].Encode(c)
+	headerData, err := cmdHeaderCodecs[serialType].Encode(c)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func DecodeCommand(data []byte) (cmd *Command, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd, err = CmdHeaderCodecs[serialType].Decode(headerData)
+	cmd, err = cmdHeaderCodecs[serialType].Decode(headerData)
 	if err != nil {
 		logger.Errorf("Decode server response using serialType(%d) error, Err: %s", serialType, err)
 		return
