@@ -87,10 +87,12 @@ type defaultPushConsumer struct {
 	status              ServiceState
 	instanceName        string
 	mqClient            *MQClient
-	mqAllocateStrategy  MQAllocateStrategy
 	concurrentlyHandler MessageConcurrentlyHandler
 	orderlyHandler      MessageOrderlyHandler
-	subscription        map[string]string
+	subscription        sync.Map
+	executer            *TimeWheel
+	rebalancer          *rebalancer
+	offsetStore         OffsetStore
 }
 
 var consumerTable sync.Map
@@ -115,13 +117,22 @@ func NewPushConsumer(consumerGroup string, config *ConsumerConfig) (PushConsumer
 	}
 
 	c := &defaultPushConsumer{
-		consumerGroup:      consumerGroup,
-		instanceName:       instanceName,
-		config:             *config,
-		status:             CreateJust,
-		mqAllocateStrategy: mqAllocateStratgies[config.MQAllocateStrategy],
+		consumerGroup: consumerGroup,
+		instanceName:  instanceName,
+		config:        *config,
+		status:        CreateJust,
+		executer:      NewTimeWheel(5, 60),
 	}
 	return c, nil
+}
+
+func (c *defaultPushConsumer) getSubscribeTopics() []string {
+	topics := make([]string, 0)
+	c.subscription.Range(func(k, v interface{}) bool {
+		topics = append(topics, k.(string))
+		return true
+	})
+	return topics
 }
 
 func (c *defaultPushConsumer) Start() error {
@@ -134,39 +145,56 @@ func (c *defaultPushConsumer) Start() error {
 	if c.config.MessageModel == ConsumeCluster && c.instanceName == DefaultClientInstanceName {
 		c.instanceName = strconv.Itoa(os.Getpid())
 	}
-	if !registerConsumer(c.consumerGroup, c) {
+
+	c.mqClient = GetClientInstance(&c.config.ClientConfig, c.instanceName)
+	if !c.mqClient.RegisterConsumer(c.consumerGroup, c) {
 		atomic.StoreInt32(&c.status, CreateJust)
 		return errors.New("The consumer group has been created before")
 	}
-
-	c.mqClient = GetClientInstance(&c.config.ClientConfig, c.instanceName)
 	err := c.mqClient.Start()
 	if err != nil {
-		unregisterConsumer(c.consumerGroup)
 		return err
 	}
+
+	c.rebalancer = newRebalancer(c.consumerGroup, &c.config, c.mqClient)
+	c.startScheduledTask()
 	atomic.StoreInt32(&c.status, Running)
-	c.mqClient.IncrReference()
+
+	c.mqClient.SyncTopicFromNameserv()
+	err = c.checkClientInBroker()
+	if err != nil {
+		return err
+	}
 	c.mqClient.SendHeartbeatToBrokers()
+	c.rebalancer.DoRebalance()
 	return nil
 }
 
 func (c *defaultPushConsumer) Shutdown() {
 	if atomic.LoadInt32(&c.status) == Running {
-		unregisterConsumer(c.consumerGroup)
-		c.mqClient.DecrReference()
+		c.executer.Stop()
+		c.mqClient.UnregisterConsumer(c.consumerGroup)
 		c.mqClient.Shutdown()
 		atomic.StoreInt32(&c.status, ShutdownAlready)
 	}
 }
 
+func (c *defaultPushConsumer) startScheduledTask() {
+	c.executer.Start()
+	c.executer.AddJob(20*time.Second, 20*time.Second, c.rebalancer.DoRebalance)
+}
+
+func (c *defaultPushConsumer) checkClientInBroker() error {
+	return nil
+}
+
 func (c *defaultPushConsumer) Subscribe(topic string, subExpression string) error {
-	c.subscription[topic] = subExpression
+	c.subscription.Store(topic, subExpression)
 	return nil
 }
 
 func (c *defaultPushConsumer) Unsubscirbe(topic string) {
-	delete(c.subscription, topic)
+	c.subscription.Delete(topic)
 }
 
 func (c *defaultPushConsumer) RegisterConcurrentlyHandler(handler MessageConcurrentlyHandler) {
@@ -177,23 +205,20 @@ func (c *defaultPushConsumer) RegisterOrderlyHandler(handler MessageOrderlyHandl
 	c.orderlyHandler = handler
 }
 
-//register producer if not exist, one producer instance for each producerGroup
-//return true if register success
-func registerConsumer(consumerGroup string, consumer Consumer) bool {
-	_, loaded := consumerTable.LoadOrStore(consumerGroup, consumer)
-	return !loaded
+func (c *defaultPushConsumer) onMQAppend(mq MessageQueue) {
+	c.pullFromNewQueue(&mq)
 }
 
-func unregisterConsumer(consumerGroup string) {
-	consumerTable.Delete(consumerGroup)
+func (c *defaultPushConsumer) onMQRemoved(mq MessageQueue) {
+
+}
+
+func (c *defaultPushConsumer) pullFromNewQueue(mq *MessageQueue) {
+	//todo: Get queue offset
+	//initiate a new pull request
 }
 
 //NewPullConsumer returns a default rocketmq pull mode consumer
 func NewPullConsumer() PullConsumer {
 	return nil
-}
-
-//GetAllSubscribedTopics returns topic had been subscribe by consumer
-func GetAllSubscribedTopics() []string {
-	return []string{}
 }

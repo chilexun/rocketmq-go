@@ -12,8 +12,6 @@ import (
 	"time"
 )
 
-var producerTable sync.Map
-
 //SendStatus specifies the request result of send message
 type SendStatus int
 
@@ -67,6 +65,7 @@ type defaultProducer struct {
 	status           ServiceState
 	instanceName     string
 	mqClient         *MQClient
+	usingTopics      sync.Map
 	mqSelectStrategy MQSelectStrategy
 }
 
@@ -92,6 +91,15 @@ func NewProducer(producerGroup string, config *ProducerConfig) (Producer, error)
 	return p, nil
 }
 
+func (p *defaultProducer) getPublishTopics() []string {
+	topics := make([]string, 0)
+	p.usingTopics.Range(func(k, v interface{}) bool {
+		topics = append(topics, k.(string))
+		return true
+	})
+	return topics
+}
+
 func (p *defaultProducer) Start() error {
 	if !atomic.CompareAndSwapInt32(&p.status, CreateJust, StartFailed) {
 		return errors.New("The producer service state not OK, maybe started once")
@@ -99,28 +107,25 @@ func (p *defaultProducer) Start() error {
 	if p.producerGroup != ClientInnerProducerGroup && p.instanceName == DefaultClientInstanceName {
 		p.instanceName = strconv.Itoa(os.Getpid())
 	}
-	if !registerProducer(p.producerGroup, p) {
+
+	p.mqClient = GetClientInstance(&p.config.ClientConfig, p.instanceName)
+	if !p.mqClient.RegisterProducer(p.producerGroup, p) {
 		atomic.StoreInt32(&p.status, CreateJust)
 		return errors.New("The producer group has been created before")
 	}
-
-	p.mqClient = GetClientInstance(&p.config.ClientConfig, p.instanceName)
 	err := p.mqClient.Start()
 	if err != nil {
-		unregisterProducer(p.producerGroup)
 		return err
 	}
 
 	atomic.StoreInt32(&p.status, Running)
-	p.mqClient.IncrReference()
 	p.mqClient.SendHeartbeatToBrokers()
 	return nil
 }
 
 func (p *defaultProducer) Shutdown() {
 	if atomic.LoadInt32(&p.status) == Running {
-		unregisterProducer(p.producerGroup)
-		p.mqClient.DecrReference()
+		p.mqClient.UnregisterProducer(p.producerGroup)
 		p.mqClient.Shutdown()
 		atomic.StoreInt32(&p.status, ShutdownAlready)
 	}
@@ -186,6 +191,7 @@ func (p *defaultProducer) SendAsync(msg Message, callback SendCallback, timeout 
 }
 
 func (p *defaultProducer) sendKernelImpl(msg *Message, mq *MessageQueue, timeout time.Duration) (*SendResult, error) {
+	p.usingTopics.Store(mq.Topic, true)
 	brokerAddr := p.mqClient.GetBrokerAddrByName(mq.Topic, mq.BrokerName, p.config.SendMessageWithVIPChannel)
 	if brokerAddr == "" {
 		return nil, fmt.Errorf("The broker [%s] not exist", mq.BrokerName)
@@ -263,25 +269,4 @@ func setRetryHeader(header *SendMessageRequest, msgProps map[string]string) {
 		header.MaxReconsumeTimes, _ = strconv.Atoi(maxReTimes)
 		delete(msgProps, MessageMaxReconsumeTimes)
 	}
-}
-
-//register producer if not exist, one producer instance for each producerGroup
-//return true if register success
-func registerProducer(producerGroup string, producer Producer) bool {
-	_, loaded := producerTable.LoadOrStore(producerGroup, producer)
-	return !loaded
-}
-
-func unregisterProducer(producerGroup string) {
-	producerTable.Delete(producerGroup)
-}
-
-//GetAllProducerGroups returns the snapshot of all register producer group
-func GetAllProducerGroups() []string {
-	groups := make([]string, 0)
-	producerTable.Range(func(k interface{}, v interface{}) bool {
-		groups = append(groups, k.(string))
-		return true
-	})
-	return groups
 }

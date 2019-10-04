@@ -72,6 +72,28 @@ func (r *SendMessageResponse) fromExtFields(fields map[string]string) (err error
 	return
 }
 
+type PullMessageRequest struct {
+	ConsumerGroup        string
+	Topic                string
+	QueueID              int
+	QueueOffset          int64
+	MaxMsgNums           int
+	SysFlag              int
+	CommitOffset         int64
+	SuspendTimeoutMillis int64
+	Subscription         string
+	SubVersion           int64
+	ExpressionType       string
+}
+
+type PullMessageResponse struct {
+	Status          PullStatus
+	NextBeginOffset int64
+	MinOffset       int64
+	MaxOffset       int64
+	MsgFoundList    []MessageExt
+}
+
 func newCommand(code RequestCode) *Command {
 	return &Command{
 		Opaque:   getRequestID(),
@@ -108,6 +130,18 @@ func HeartBeat(data *HeartbeatData) Command {
 	cmd := newCommand(HeartBeatReq)
 	cmd.Body = body
 	return *cmd
+}
+
+func GetConsumersByGroup(consumerGroup string) Command {
+	cmd := newCommand(GetConsumerListByGroupReq)
+	header := make(map[string]string, 1)
+	header["consumerGroup"] = consumerGroup
+	cmd.ExtFields = header
+	return *cmd
+}
+
+type ConsumerListByGroupResponse struct {
+	ConsumerIdList []string `json:"consumerIdList"`
 }
 
 //EncodeCommand encode the command with the specify serial type

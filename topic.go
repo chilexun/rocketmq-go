@@ -71,6 +71,14 @@ func (m *TopicRouteInfoManager) SetTopicRouteData(topic string, data *TopicRoute
 	m.topicRouteTable.Store(topic, cloneRouteData(data))
 }
 
+func (m *TopicRouteInfoManager) GetTopicRouteData(topic string) *TopicRouteData {
+	routeData, ok := m.topicRouteTable.Load(topic)
+	if ok {
+		return routeData.(*TopicRouteData)
+	}
+	return nil
+}
+
 func toPublishInfo(topic string, route *TopicRouteData) *TopicPublishInfo {
 	info := new(TopicPublishInfo)
 	info.HasRouteInfo = true
@@ -171,8 +179,11 @@ func (t *TopicPublishInfo) GetNextQueue() MessageQueue {
 }
 
 //GetTopicSubscribeInfo returns consumer topic subscription info
-func (m *TopicRouteInfoManager) GetTopicSubscribeInfo() {
-
+func (m *TopicRouteInfoManager) GetTopicSubscribeInfo(topic string) []MessageQueue {
+	if v, ok := m.subscribeTable.Load(topic); ok {
+		return v.([]MessageQueue)
+	}
+	return nil
 }
 
 //GetBrokerAddrByName return broker address by broker name
@@ -182,9 +193,7 @@ func (m *TopicRouteInfoManager) GetBrokerAddrByName(brokerName string, vipPrefer
 		addr, ok := clusterTable.(map[int]string)[MasterBrokerID]
 		if ok {
 			if vipPrefer {
-				ipAndPort := strings.Split(addr, ":")
-				port, _ := strconv.Atoi(ipAndPort[1])
-				return ipAndPort[0] + ":" + strconv.Itoa(port-2)
+				return BrokerVIPAddr(addr)
 			}
 			return addr
 		}
@@ -205,4 +214,10 @@ func (m *TopicRouteInfoManager) GetBrokerAddrTable() map[string]string {
 		return true
 	})
 	return result
+}
+
+func BrokerVIPAddr(addr string) string {
+	ipAndPort := strings.Split(addr, ":")
+	port, _ := strconv.Atoi(ipAndPort[1])
+	return ipAndPort[0] + ":" + strconv.Itoa(port-2)
 }

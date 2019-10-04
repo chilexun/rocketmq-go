@@ -48,6 +48,7 @@ type ConsumerConfig struct {
 	ConsumeMessageBatchMaxSize int `min:"1" max:"1024" default:"1"`
 	PullBatchSize              int `min:"1" max:"1024" default:"32"`
 	MQAllocateStrategy         MQAllocateStrategyType
+	OffsetStore                OffsetStore
 }
 
 //NewProducerConfig return a new default producer configuration

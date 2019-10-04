@@ -34,24 +34,33 @@ const (
 	StartFailed
 )
 
+type producerClient interface {
+	getPublishTopics() []string
+}
+
+type consumerClient interface {
+	getSubscribeTopics() []string
+}
+
+//MQClient cache, key:clientID; value:*MQClient
 var clientMap sync.Map
 
 //A MQClient represent the a rocketmq client object related to Producer and Consumer
 type MQClient struct {
-	clientID      string
-	config        *ClientConfig
-	rpcClient     RPCClient
-	status        ServiceState
-	executer      *TimeWheel
-	hbState       int32
-	brokerVerMap  sync.Map
-	nameServAddrs []string
-	nameserv      atomic.Value
-	nameservLock  sync.Mutex
-	refCount      int32
-	topicLock     sync.Mutex
-	topicManager  TopicRouteInfoManager
-	usedTopics    sync.Map
+	clientID        string
+	config          *ClientConfig
+	rpcClient       RPCClient
+	status          ServiceState
+	executer        *TimeWheel
+	hbState         int32
+	brokerVerMap    sync.Map
+	nameServAddrs   []string
+	nameserv        atomic.Value
+	nameservLock    sync.Mutex
+	producerClients sync.Map //key:producerGroup; value:producerClient
+	consumerClients sync.Map //key:consumerGroup; value:consumerClient
+	topicLock       sync.Mutex
+	topicManager    TopicRouteInfoManager
 }
 
 //GetClientInstance create a new client if instanceName had not been used
@@ -97,7 +106,14 @@ func (client *MQClient) Start() (err error) {
 
 //Shutdown will stop the jobs and close connections if reference count gt 0
 func (client *MQClient) Shutdown() {
-	if atomic.LoadInt32(&client.refCount) > 0 {
+	exists := false
+	f := func(k, v interface{}) bool {
+		exists = true
+		return false
+	}
+	client.producerClients.Range(f)
+	client.consumerClients.Range(f)
+	if exists {
 		return
 	}
 	if atomic.CompareAndSwapInt32(&client.status, Running, ShutdownAlready) {
@@ -106,20 +122,31 @@ func (client *MQClient) Shutdown() {
 	}
 }
 
-//IncrReference increase client reference count by 1
-func (client *MQClient) IncrReference() int32 {
-	return atomic.AddInt32(&client.refCount, 1)
+//RegisterProducer to MQ client, return false is producer group already registed
+func (client *MQClient) RegisterProducer(producerGroup string, producer producerClient) bool {
+	_, loaded := client.producerClients.LoadOrStore(producerGroup, producer)
+	return !loaded
 }
 
-//DecrReference decrease client reference count by 1
-func (client *MQClient) DecrReference() int32 {
-	return atomic.AddInt32(&client.refCount, -1)
+//UnregisterProducer from MQ client
+func (client *MQClient) UnregisterProducer(producerGroup string) {
+	client.producerClients.Delete(producerGroup)
+}
+
+//RegisterConsumer to MQ Client, return false if consumer group already registed
+func (client *MQClient) RegisterConsumer(consumerGroup string, consumer consumerClient) bool {
+	_, loaded := client.consumerClients.LoadOrStore(consumerGroup, consumer)
+	return !loaded
+}
+
+//UnregisterConsumer from MQ client
+func (client *MQClient) UnregisterConsumer(consumerGroup string) {
+	client.consumerClients.Delete(consumerGroup)
 }
 
 //SendMessageRequest accept a msg request and return a send result response
 func (client *MQClient) SendMessageRequest(brokerAddr string, mq *MessageQueue,
 	request *SendMessageRequest, timeout time.Duration) (*SendMessageResponse, error) {
-	client.usedTopics.Store(mq.Topic, true)
 	cmd := SendMessage(request)
 	respCmd, err := client.rpcClient.InvokeSync(brokerAddr, &cmd, timeout)
 	if err != nil {
@@ -131,6 +158,16 @@ func (client *MQClient) SendMessageRequest(brokerAddr string, mq *MessageQueue,
 	response.Code = ResponseCode(respCmd.Code)
 	response.Remark = respCmd.Remark
 	return response, err
+}
+
+func (client *MQClient) PullMessageRequest(brokerAddr string, request *PullMessageRequest,
+	timeout time.Duration) (*PullResult, error) {
+	return nil, nil
+}
+
+func (client *MQClient) PullMessageAsyncRequest(brokerAddr string, request *PullMessageRequest,
+	callback PullCallback, timeout time.Duration) error {
+	return nil
 }
 
 func (client *MQClient) startScheduledTask() {
@@ -155,7 +192,7 @@ func (client *MQClient) SendHeartbeatToBrokers() {
 
 func (client *MQClient) sendHeartbeatToBroker(brokerName string, brokerAddr string) {
 	heartbeat := HeartbeatData{ClientID: client.clientID}
-	groups := GetAllProducerGroups()
+	groups := client.GetAllProducerGroups()
 	if len(groups) <= 0 {
 		return
 	}
@@ -217,10 +254,24 @@ func (client *MQClient) SyncTopicFromNameserv() {
 	client.topicLock.Lock()
 	defer client.topicLock.Unlock()
 
-	client.usedTopics.Range(func(k, value interface{}) bool {
-		client.syncTopicFromNameserv(k.(string))
+	usedTopics := make(map[string]bool)
+	client.producerClients.Range(func(k, v interface{}) bool {
+		p := v.(producerClient)
+		for _, topic := range p.getPublishTopics() {
+			usedTopics[topic] = true
+		}
 		return true
 	})
+	client.consumerClients.Range(func(k, v interface{}) bool {
+		c := v.(consumerClient)
+		for _, topic := range c.getSubscribeTopics() {
+			usedTopics[topic] = true
+		}
+		return true
+	})
+	for topic := range usedTopics {
+		client.syncTopicFromNameserv(topic)
+	}
 }
 
 //GetTopicPublishInfo load topic route from cache  and try to fetch from nameserv if no cache
@@ -240,16 +291,42 @@ func (client *MQClient) GetTopicPublishInfo(topic string) *TopicPublishInfo {
 	return client.topicManager.GetTopicPublishInfo(topic)
 }
 
+//GetTopicPublishInfo returns the mqs of the specific topic
+func (client *MQClient) GetTopicSubscribeInfo(topic string) []MessageQueue {
+	return client.topicManager.GetTopicSubscribeInfo(topic)
+}
+
 //GetBrokerAddrByName returns the master broker addr. Will try to sync topic route if no addr was found
 func (client *MQClient) GetBrokerAddrByName(topic string, brokerName string, vipPrefer bool) string {
 	addr := client.topicManager.GetBrokerAddrByName(brokerName, vipPrefer)
 	if addr == "" {
-		client.topicLock.Lock()
-		defer client.topicLock.Unlock()
-		client.syncTopicFromNameserv(topic)
+		client.syncTopicFromNameservWithLock(topic)
 		addr = client.topicManager.GetBrokerAddrByName(brokerName, vipPrefer)
 	}
 	return addr
+}
+
+//GetBrokerAddrByTopic returns master broker addr
+//If the master's address cannot be found, a slave broker address is selected in a random manner.
+func (client *MQClient) GetBrokerAddrByTopic(topic string) string {
+	routeData := client.topicManager.GetTopicRouteData(topic)
+	if routeData != nil && routeData.brokerDatas != nil {
+		brokers := routeData.brokerDatas
+		index := rand.Intn(len(brokers))
+		brokerData := brokers[index]
+		masterAddr := brokerData.brokerAddrs[MasterBrokerID]
+		if masterAddr == "" {
+			index = rand.Intn(len(brokerData.brokerAddrs))
+			return brokerData.brokerAddrs[index]
+		}
+	}
+	return ""
+}
+
+func (client *MQClient) syncTopicFromNameservWithLock(topic string) {
+	client.topicLock.Lock()
+	defer client.topicLock.Unlock()
+	client.syncTopicFromNameserv(topic)
 }
 
 func (client *MQClient) syncTopicFromNameserv(topic string) {
@@ -374,4 +451,81 @@ func (client *MQClient) selectActiveNameServ() string {
 		index %= len(addrList)
 	}
 	return ""
+}
+
+func (client *MQClient) GetAllPublishTopics() []string {
+	topics := make(map[string]bool)
+	result := make([]string, 0)
+	client.producerClients.Range(func(k, v interface{}) bool {
+		p := v.(producerClient)
+		for _, t := range p.getPublishTopics() {
+			if !topics[t] {
+				result = append(result, t)
+			}
+			topics[t] = true
+		}
+		return true
+	})
+	return result
+}
+
+func (client *MQClient) GetAllSubscribeTopics() []string {
+	topics := make(map[string]bool)
+	result := make([]string, 0)
+	client.consumerClients.Range(func(k, v interface{}) bool {
+		c := v.(consumerClient)
+		for _, t := range c.getSubscribeTopics() {
+			if !topics[t] {
+				result = append(result, t)
+			}
+			topics[t] = true
+		}
+		return true
+	})
+	return result
+}
+
+func (client *MQClient) GetAllProducerGroups() []string {
+	groups := make([]string, 0)
+	client.producerClients.Range(func(k, v interface{}) bool {
+		groups = append(groups, k.(string))
+		return true
+	})
+	return groups
+}
+
+func (client *MQClient) GetAllConsumerGroups() []string {
+	groups := make([]string, 0)
+	client.consumerClients.Range(func(k, v interface{}) bool {
+		groups = append(groups, k.(string))
+		return true
+	})
+	return groups
+}
+
+func (client *MQClient) FindConsumerIDs(topic string, consumerGroup string) []string {
+	brokerAddr := client.GetBrokerAddrByTopic(topic)
+	if brokerAddr == "" {
+		client.syncTopicFromNameservWithLock(topic)
+		brokerAddr = client.GetBrokerAddrByTopic(topic)
+	}
+	if brokerAddr == "" {
+		return nil
+	}
+
+	req := GetConsumersByGroup(consumerGroup)
+	resp, err := client.rpcClient.InvokeSync(BrokerVIPAddr(brokerAddr), &req, 3*time.Second)
+	if err != nil {
+		logger.Errorf("RPC error:", err)
+	}
+	if ResponseCode(resp.Code) != Success {
+		logger.Errorf("Get consumer IDs error, broker:%s resp:[code=%d, remark=%s]", brokerAddr, resp.Code, resp.Remark)
+	}
+
+	cidsData := new(ConsumerListByGroupResponse)
+	err = json.Unmarshal(resp.Body, cidsData)
+	if err != nil {
+		logger.Errorf("Invalid response body of GetConsumerIDsByGroup, broker:%s", brokerAddr)
+	}
+	return cidsData.ConsumerIdList
 }
