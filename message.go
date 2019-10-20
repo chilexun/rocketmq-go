@@ -167,3 +167,15 @@ type MessageExt struct {
 	ReconsumeTimes            int
 	PreparedTransactionOffset int64
 }
+
+func (m *MessageExt) GetProperty(propName string) string {
+	return ""
+}
+
+func (m *MessageExt) SetProperty(name, value string) {
+
+}
+
+func decodeMessage([]byte) []MessageExt {
+	return nil
+}

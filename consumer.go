@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,11 +49,13 @@ type PullCallback interface {
 
 //PullResult represents the result data of pull message
 type PullResult struct {
-	PullStatus      PullStatus
-	NextBeginOffset int64
-	MinOffset       int64
-	MaxOffset       int64
-	MsgFoundList    []MessageExt
+	PullStatus           PullStatus
+	NextBeginOffset      int64
+	MinOffset            int64
+	MaxOffset            int64
+	MsgFoundList         []MessageExt
+	suggestWhichBrokerId int64
+	messageBinary        []byte
 }
 
 //MQChangedHandler will be callback when a message queue changed
@@ -93,6 +96,7 @@ type defaultPushConsumer struct {
 	executer            *TimeWheel
 	rebalancer          *rebalancer
 	offsetStore         OffsetStore
+	pullService         *MessagePullExecutor
 }
 
 var consumerTable sync.Map
@@ -214,8 +218,36 @@ func (c *defaultPushConsumer) onMQRemoved(mq MessageQueue) {
 }
 
 func (c *defaultPushConsumer) pullFromNewQueue(mq *MessageQueue) {
-	//todo: Get queue offset
-	//initiate a new pull request
+	lastOffset, err := c.offsetStore.readOffset(*mq)
+	if err != nil {
+		//read offset fail
+		return
+	}
+	if lastOffset < 0 {
+		switch c.config.ConsumeFromWhere {
+		case ConsumeFromLastOffset:
+			if strings.HasPrefix(mq.Topic, "%RETRY%") {
+				lastOffset = 0
+			} else {
+				//fetch max offset
+			}
+		case ConsumeFromFirstOffset:
+			lastOffset = 0
+		case ConsumeFromTimestamp:
+			if strings.HasPrefix(mq.Topic, "%RETRY%") {
+				//fetch max offset
+			} else {
+				//search offset
+			}
+		}
+	}
+
+	pullReq := &MessagePullParams{
+		consumerGroup: c.consumerGroup,
+		offset:        lastOffset,
+		mq:            *mq,
+	}
+	c.pullService.Pull(pullReq)
 }
 
 //NewPullConsumer returns a default rocketmq pull mode consumer

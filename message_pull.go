@@ -1,6 +1,9 @@
 package mqclient
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 type MessagePullParams struct {
 	consumerGroup              string
@@ -36,4 +39,32 @@ func (p *MessagePullExecutor) pullKernelImpl(params MessagePullParams,
 	}
 	p.mqclient.PullMessageAsyncRequest(addr, req, callback, timeout)
 	return nil
+}
+
+type defaultPullCallback struct {
+}
+
+func (cb *defaultPullCallback) OnSuccess(result PullResult) {
+
+}
+
+func (cb *defaultPullCallback) OnError(err error) {
+
+}
+
+func resolvePullResult(result *PullResult) {
+	if result.PullStatus == PullFound {
+		msgList := decodeMessage(result.messageBinary)
+		for _, msgExt := range msgList {
+			traFlag := msgExt.GetProperty(MessageTransactionPrepared)
+			if res, err := strconv.ParseBool(traFlag); err == nil && res {
+				msgExt.TransactionID = msgExt.GetProperty(MessageUniqClientMessageIDKeyIdx)
+			}
+			msgExt.SetProperty(MessageMinOffset, strconv.FormatInt(result.MinOffset, 10))
+			msgExt.SetProperty(MessageMaxOffset, strconv.FormatInt(result.MaxOffset, 10))
+		}
+
+		result.MsgFoundList = msgList
+	}
+	result.messageBinary = nil
 }
